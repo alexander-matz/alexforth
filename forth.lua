@@ -1,7 +1,7 @@
-local MODE_COMPILE = 1
-local MODE_IMMEDIATE = 0
+local STATE_COMPILE = 1
+local STATE_IMMEDIATE = 0
 
-local MODE = MODE_IMMEDIATE
+local STATE = STATE_IMMEDIATE
 local STDIN_BUFFER = nil
 local MEMORY = {}
 local DICTIONARY = {}
@@ -11,42 +11,47 @@ local function _push_ds(value)
     table.insert(D_STACK, value)
 end
 
-local function _pop_ds()
+local function _peek_ds()
     if #D_STACK == 0 then
-        error("Attemting to pop from empty stack")
+        error("Attemting to access empty stack")
     end
     local val = D_STACK[#D_STACK]
+    return val
+end
+
+local function _pop_ds()
+    local val = _peek_ds()
     table.remove(D_STACK)
     return val
 end
 
-local function _add_word(name, fn)
+local function _add_word(name, fn, immediate)
     assert(name:find("%s") == nil)
     assert(type(fn) == "function")
-    table.insert(DICTIONARY, { name = string.upper(name), fn = fn })
+    table.insert(DICTIONARY, { name = string.upper(name), fn = fn, immediate = immediate or false })
 end
 
 local function _find(name)
     for idx=#DICTIONARY,1,-1 do
         if DICTIONARY[idx].name == string.upper(name) then
-            return DICTIONARY[idx].fn
+            return DICTIONARY[idx]
         end
     end
     return nil
 end
 
 local function _call(name)
-    local fn = _find(name)
-    if not fn then
+    local entry = _find(name)
+    if not entry then
         error(string.format("Did not a definition for word %s", name))
     end
-    fn()
+    entry.fn()
 end
 
 local _exit = function() end
 
 local function _make_word(start_idx)
-    return function()
+    return function ()
         for idx = start_idx,#MEMORY,1 do
             local word = MEMORY[idx]
             if word == _exit then
@@ -117,14 +122,25 @@ _add_word("MEM_HERE", function ()
     _push_ds(#MEMORY)
 end)
 
+_add_word("BIND", function ()
+    local fn = _pop_ds()
+    local name = _pop_ds()
+    _add_word(name, fn)
+end)
+
 _add_word("FIND", function ()
     local name = _pop_ds()
-    local fn = _find(name)
-    if not fn then
+    local entry = _find(name)
+    if not entry then
         _push_ds(0)
     else
-        _push_ds(fn)
+        _push_ds(entry)
     end
+end)
+
+_add_word(">CFA", function ()
+    local entry = _pop_ds()
+    _push_ds(entry.fn)
 end)
 
 _add_word("DUP", function ()
@@ -144,6 +160,18 @@ _add_word("SWAP", function ()
     _push_ds(v2)
 end)
 
+_add_word("+", function ()
+    local v1 = _pop_ds()
+    local v2 = _pop_ds()
+    _push_ds(v1 + v2)
+end)
+
+_add_word("-", function ()
+    local v1 = _pop_ds()
+    local v2 = _pop_ds()
+    _push_ds(v2 - v1)
+end)
+
 _add_word(".", function ()
     local val = _pop_ds()
     assert(type(val) == "number")
@@ -151,41 +179,68 @@ _add_word(".", function ()
 end)
 
 _add_word("INTERPRET", function ()
-    while true do
-        _call("WORD")
-        _call("DUP")
-        _call("FIND")
-        local result = _pop_ds()
-        if result == 0 then
-            _call("NUMBER")
-            _call("MAKE_LIT")
-        else
-            _call("DROP")
-            _push_ds(result)
+    _call("WORD")
+    _call("DUP")
+    _call("FIND")
+    local result = _pop_ds()
+    local number = false
+    if result == 0 then
+        _call("NUMBER")
+        _call("MAKE_LIT")
+        number = true
+    else
+        _call("DROP")
+        _push_ds(result)
+    end
+    if STATE == STATE_IMMEDIATE then
+        if not number then
+            _call(">CFA")
         end
         local word_fn = _pop_ds()
         word_fn()
+    else
+        local entry = _peek_ds()
+        if number then
+            _call(",")
+        elseif not entry.immediate then
+            _call(">CFA")
+            _call(",")
+        else
+            _pop_ds()
+            entry.fn()
+        end
     end
 end)
+
+_add_word("[", function ()
+    print("STATE = compile")
+    STATE = STATE_COMPILE
+end)
+
+_add_word("]", function ()
+    print("STATE = immediate")
+    STATE = STATE_IMMEDIATE
+end)
+
+_add_word(":", function ()
+    _call("WORD")
+    _call("MEM_HERE")
+    _push_ds(1)
+    _call("+")
+    _call("[")
+end)
+
+_add_word(";", function ()
+    _push_ds(_exit)
+    _call(",")
+    _call("MAKE_WORD")
+    _call("BIND")
+    _call("]")
+end, true)
 
 -------------------------------------------------------------------------------
 -- EXPERIMENTS
 -------------------------------------------------------------------------------
-
--- (function()
---     _call("MEM_HERE")
-
---     _push_ds(".")
---     _call("FIND")
---     _call(",")
---     _push_ds("EXIT")
---     _call("FIND")
---     _call("PUSH_MEM")
-
---     _add_word("MY_WORD", _make_definition({
---         _find(".")
---     }))
--- end)()
 
 
 _add_word("DUMP", function()
@@ -193,6 +248,52 @@ _add_word("DUMP", function()
         print(string.format("%d: %s", idx, tostring(D_STACK[idx])))
     end
 end)
+
+;(function()
+    _push_ds("MYDOT")
+
+    _call("MEM_HERE")
+    _push_ds(1)
+    _call("+")
+
+    _push_ds(".")
+    _call("FIND")
+    _call(">CFA")
+    _call(",")
+
+    _push_ds("EXIT")
+    _call("FIND")
+    _call(">CFA")
+    _call(",")
+
+    _call("MAKE_WORD")
+    _call("BIND")
+end)()
+
+;(function()
+    _push_ds("PRINT123")
+
+    _call("MEM_HERE")
+    _push_ds(1)
+    _call("+")
+
+    _push_ds(123)
+    _call("MAKE_LIT")
+    _call(",")
+
+    _push_ds(".")
+    _call("FIND")
+    _call(">CFA")
+    _call(",")
+
+    _push_ds("EXIT")
+    _call("FIND")
+    _call(">CFA")
+    _call(",")
+
+    _call("MAKE_WORD")
+    _call("BIND")
+end)()
 
 -------------------------------------------------------------------------------
 -- MAIN LOOP
