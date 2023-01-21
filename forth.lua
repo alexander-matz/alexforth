@@ -41,8 +41,7 @@ end
 local _docol
 
 -- word header: link, name, flags, fn1, fn2, ...
-local function _add_word(name, flags, code)
-    assert(type(code) == "table")
+local function _create(name, flags)
     local OFFSET = #MEM+1
     if LATEST ~= nil then
         MEM[LATEST] = OFFSET
@@ -50,11 +49,26 @@ local function _add_word(name, flags, code)
     table.insert(MEM, false) -- false instead of nil for link to avoid sparse arrays
     table.insert(MEM, name)
     table.insert(MEM, flags)
+    return OFFSET
+end
+
+local function _add_word(name, flags, code)
+    assert(type(code) == "table")
+    local OFFSET = _create(name, flags)
     table.insert(MEM, _docol(#MEM+1))
     for _, fn in ipairs(code) do
         table.insert(MEM, fn)
     end
     table.insert(MEM, EXIT)
+    return OFFSET
+end
+
+local function _add_native(name, flags, code)
+    assert(type(code) == "table")
+    local OFFSET = _create(name, flags)
+    for _, fn in ipairs(code) do
+        table.insert(MEM, fn)
+    end
     return OFFSET
 end
 
@@ -104,7 +118,7 @@ function EXIT()
         return _next()
     end
 end
-_add_word("EXIT", {}, {EXIT})
+_add_native("EXIT", {}, {EXIT})
 
 function LIT()
     local val = MEM[NEXT_INST]
@@ -112,7 +126,7 @@ function LIT()
     NEXT_INST = NEXT_INST + 1
     return _next()
 end
-_add_word("LIT", {}, {LIT})
+_add_native("LIT", {}, {LIT})
 
 function WORD()
     while true do
@@ -132,7 +146,7 @@ function WORD()
         end
     end
 end
-_add_word("WORD", {}, {WORD})
+_add_native("WORD", {}, {WORD})
 
 function DUMP()
     for idx = #DSTACK,1,-1 do
@@ -140,13 +154,13 @@ function DUMP()
     end
     return _next()
 end
-_add_word("DUMP", {}, {DUMP})
+_add_native("DUMP", {}, {DUMP})
 
 function DOT()
     print(string.format("%d", _popds()))
     return _next()
 end
-_add_word(".", {}, {DOT})
+_add_native(".", {}, {DOT})
 
 MYSUB = _cfa(_add_word("MYSUB", {}, {LIT, 1337, DOT}))
 MYPROGRAM = _cfa(_add_word("MYPROGRAM", {}, {WORD, LIT, 2, LIT, 3, MEM[MYSUB], LIT, 4, DUMP}))
