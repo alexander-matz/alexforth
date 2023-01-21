@@ -38,6 +38,7 @@ local function log(msg, ...)
     print(string.format(msg, ...))
 end
 
+local _cfa
 local _docol
 
 -- word header: link, name, flags, fn1, fn2, ...
@@ -60,7 +61,7 @@ local function _add_word(name, flags, code)
         table.insert(MEM, fn)
     end
     table.insert(MEM, EXIT)
-    return OFFSET
+    return _cfa(OFFSET)
 end
 
 local function _add_native(name, flags, code)
@@ -69,7 +70,7 @@ local function _add_native(name, flags, code)
     for _, fn in ipairs(code) do
         table.insert(MEM, fn)
     end
-    return OFFSET
+    return _cfa(OFFSET)
 end
 
 local function _find(name)
@@ -82,14 +83,14 @@ local function _find(name)
     end
 end
 
-local function _popds()
+local function _popds ()
     if #DSTACK == 0 then
         error("trying to access empty data stack")
     end
     return table.remove(DSTACK)
 end
 
-local function _cfa(offset)
+_cfa = function (offset)
     return offset + 3
 end
 
@@ -103,7 +104,7 @@ end
 -- because this VM currently runs direct threaded
 -- code and a function is not aware
 -- "where it was called from".
-_docol = function(location)
+_docol = function (location)
     local function DOCOL()
         table.insert(RSTACK, NEXT_INST)
         NEXT_INST = location + 1
@@ -162,8 +163,8 @@ function DOT()
 end
 _add_native(".", {}, {DOT})
 
-MYSUB = _cfa(_add_word("MYSUB", {}, {LIT, 1337, DOT}))
-MYPROGRAM = _cfa(_add_word("MYPROGRAM", {}, {WORD, LIT, 2, LIT, 3, MEM[MYSUB], LIT, 4, DUMP}))
+MYSUB = _add_word("MYSUB", {}, {LIT, 1337, DOT})
+MYPROGRAM = _add_word("MYPROGRAM", {}, {WORD, LIT, 2, LIT, 3, MEM[MYSUB], LIT, 4, DUMP})
 
 NEXT_INST = nil
 MEM[MYPROGRAM]()
