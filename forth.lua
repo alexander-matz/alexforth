@@ -1,308 +1,149 @@
-local STATE_COMPILE = 1
-local STATE_IMMEDIATE = 0
+--[[
+    This is a high level implementation of the FORTH vm with identical
+    semantics to the final VM, i.e. a FORTH program written for this
+    vm should be valid and exhibit the same behavior on the final,
+    assembly-based vm.
 
-local STATE = STATE_IMMEDIATE
-local STDIN_BUFFER = nil
-local MEMORY = {}
-local DICTIONARY = {}
-local D_STACK = {}
+    The main exception here is that
+    Exceptions are:
+    - Handling of strings. Strings are pushed to the data stack directly
+        instead of as start + end addresses
+    - Data
 
-local function _push_ds(value)
-    table.insert(D_STACK, value)
+    Lua supports proper tail calls by default. This is very convenient
+    because it allows to implement the vm with indirect thread code
+    right away.
+--]]
+
+--------------------------------------
+-- CONSTANTS
+
+STATE_IMMEDIATE = 0
+STATE_COMPILE = 1
+
+--------------------------------------
+-- VM
+
+MEM = {}
+LATEST = nil
+
+DSTACK = {}
+RSTACK = {}
+NEXT_INST = nil
+LAST_JMPED_INST = nil
+STATE = STATE_IMMEDIATE
+
+--------------------------------------
+
+local function log(msg, ...)
+    print(string.format(msg, ...))
 end
 
-local function _peek_ds()
-    if #D_STACK == 0 then
-        error("Attemting to access empty stack")
+-- word header: link, name, flags, fn1, fn2, ...
+local function _add_word(name, flags, code)
+    assert(type(code) == "table")
+    local OFFSET = #MEM+1
+    log("Word %s code starting at %d", name, OFFSET+3)
+    if LATEST ~= nil then
+        MEM[LATEST] = OFFSET
     end
-    local val = D_STACK[#D_STACK]
-    return val
-end
-
-local function _pop_ds()
-    local val = _peek_ds()
-    table.remove(D_STACK)
-    return val
-end
-
-local function _add_word(name, fn, immediate)
-    assert(name:find("%s") == nil)
-    assert(type(fn) == "function")
-    table.insert(DICTIONARY, { name = string.upper(name), fn = fn, immediate = immediate or false })
+    MEM[OFFSET+0] = nil
+    MEM[OFFSET+1] = name
+    MEM[OFFSET+2] = flags
+    for idx, fn in ipairs(code) do
+        MEM[OFFSET+2 + idx] = fn
+    end
+    return OFFSET
 end
 
 local function _find(name)
-    for idx=#DICTIONARY,1,-1 do
-        if DICTIONARY[idx].name == string.upper(name) then
-            return DICTIONARY[idx]
+    local offset = LATEST
+    while offset ~= nil do
+        if MEM[offset + 1] == name then
+            return offset
         end
-    end
-    return nil
-end
-
-local function _call(name)
-    local entry = _find(name)
-    if not entry then
-        error(string.format("Did not a definition for word %s", name))
-    end
-    entry.fn()
-end
-
-local _exit = function() end
-
-local function _make_word(start_idx)
-    return function ()
-        for idx = start_idx,#MEMORY,1 do
-            local word = MEMORY[idx]
-            if word == _exit then
-                break
-            end
-            word()
-        end
+        offset = MEM[offset]
     end
 end
 
-_add_word("EXIT", _exit)
-
-_add_word("MAKE_WORD", function ()
-    local idx = _pop_ds()
-    _push_ds(_make_word(idx))
-end)
-
-_add_word("MAKE_LIT", function ()
-    local number = _pop_ds()
-    _push_ds(function()
-        _push_ds(number)
-    end)
-end)
-
-_add_word("WORD", function ()
-    if not STDIN_BUFFER then
-        io.write(">>> ")
-        io.flush()
-        local err
-        STDIN_BUFFER = io.read("*line")
-        if not STDIN_BUFFER then
-            os.exit(0)
-        end
+local function _popds()
+    if #DSTACK == 0 then
+        error("trying to access empty data stack")
     end
-    local first, last = STDIN_BUFFER:find("%S+")
-    if not first then
-        STDIN_BUFFER = nil
-        return _call("WORD")
+    return table.remove(DSTACK)
+end
+
+local function _cfa(offset)
+    return offset + 3
+end
+
+local function _next()
+    LAST_JMPED_INST = NEXT_INST
+    NEXT_INST = NEXT_INST + 1
+    return MEM[LAST_JMPED_INST]()
+end
+
+function EXIT()
+    NEXT_INST = table.remove(RSTACK)
+    log("EXIT popped address %s", NEXT_INST)
+    if NEXT_INST ~= nil then
+        return _next()
     end
-    _push_ds(STDIN_BUFFER:sub(first, last))
-    STDIN_BUFFER = STDIN_BUFFER:sub(last+1)
-end)
+end
+_add_word("EXIT", {}, {EXIT})
 
-_add_word("NUMBER", function ()
-    local value = _pop_ds()
-    local number = tonumber(value)
-    if not number then
-        error(string.format("Unable to parse '%s' as number", value))
-    end
-    _push_ds(number)
-end)
+function DOCOL()
+    table.insert(RSTACK, NEXT_INST)
+    NEXT_INST = LAST_JMPED_INST + 1
+    return _next()
+end
+_add_word("DOCOL", {}, {DOCOL})
 
-_add_word("EMIT", function ()
-    local ch = _pop_ds()
-    io.write(string.format("%c", ch))
-end)
+function LIT()
+    local val = MEM[NEXT_INST]
+    table.insert(DSTACK, val)
+    NEXT_INST = NEXT_INST + 1
+    return _next()
+end
+_add_word("LIT", {}, {LIT})
 
-_add_word("PRINT_STRING", function ()
-    local text = _pop_ds()
-    io.write(text)
-end)
-
-_add_word(",", function ()
-    table.insert(MEMORY, _pop_ds())
-end)
-
-_add_word("MEM_HERE", function ()
-    _push_ds(#MEMORY)
-end)
-
-_add_word("BIND", function ()
-    local fn = _pop_ds()
-    local name = _pop_ds()
-    _add_word(name, fn)
-end)
-
-_add_word("FIND", function ()
-    local name = _pop_ds()
-    local entry = _find(name)
-    if not entry then
-        _push_ds(0)
-    else
-        _push_ds(entry)
-    end
-end)
-
-_add_word(">CFA", function ()
-    local entry = _pop_ds()
-    _push_ds(entry.fn)
-end)
-
-_add_word("DUP", function ()
-    local val = _pop_ds()
-    _push_ds(val)
-    _push_ds(val)
-end)
-
-_add_word("DROP", function ()
-    _pop_ds()
-end)
-
-_add_word("SWAP", function ()
-    local v1 = _pop_ds()
-    local v2 = _pop_ds()
-    _push_ds(v1)
-    _push_ds(v2)
-end)
-
-_add_word("+", function ()
-    local v1 = _pop_ds()
-    local v2 = _pop_ds()
-    _push_ds(v1 + v2)
-end)
-
-_add_word("-", function ()
-    local v1 = _pop_ds()
-    local v2 = _pop_ds()
-    _push_ds(v2 - v1)
-end)
-
-_add_word(".", function ()
-    local val = _pop_ds()
-    assert(type(val) == "number")
-    print(val)
-end)
-
-_add_word("INTERPRET", function ()
-    _call("WORD")
-    _call("DUP")
-    _call("FIND")
-    local result = _pop_ds()
-    local number = false
-    if result == 0 then
-        _call("NUMBER")
-        _call("MAKE_LIT")
-        number = true
-    else
-        _call("DROP")
-        _push_ds(result)
-    end
-    if STATE == STATE_IMMEDIATE then
-        if not number then
-            _call(">CFA")
-        end
-        local word_fn = _pop_ds()
-        word_fn()
-    else
-        local entry = _peek_ds()
-        if number then
-            _call(",")
-        elseif not entry.immediate then
-            _call(">CFA")
-            _call(",")
-        else
-            _pop_ds()
-            entry.fn()
-        end
-    end
-end)
-
-_add_word("[", function ()
-    print("STATE = compile")
-    STATE = STATE_COMPILE
-end)
-
-_add_word("]", function ()
-    print("STATE = immediate")
-    STATE = STATE_IMMEDIATE
-end)
-
-_add_word(":", function ()
-    _call("WORD")
-    _call("MEM_HERE")
-    _push_ds(1)
-    _call("+")
-    _call("[")
-end)
-
-_add_word(";", function ()
-    _push_ds(_exit)
-    _call(",")
-    _call("MAKE_WORD")
-    _call("BIND")
-    _call("]")
-end, true)
-
--------------------------------------------------------------------------------
--- EXPERIMENTS
--------------------------------------------------------------------------------
-
-
-_add_word("DUMP", function()
-    for idx = #D_STACK,1,-1 do
-        print(string.format("%d: %s", idx, tostring(D_STACK[idx])))
-    end
-end)
-
-;(function()
-    _push_ds("MYDOT")
-
-    _call("MEM_HERE")
-    _push_ds(1)
-    _call("+")
-
-    _push_ds(".")
-    _call("FIND")
-    _call(">CFA")
-    _call(",")
-
-    _push_ds("EXIT")
-    _call("FIND")
-    _call(">CFA")
-    _call(",")
-
-    _call("MAKE_WORD")
-    _call("BIND")
-end)()
-
-;(function()
-    _push_ds("PRINT123")
-
-    _call("MEM_HERE")
-    _push_ds(1)
-    _call("+")
-
-    _push_ds(123)
-    _call("MAKE_LIT")
-    _call(",")
-
-    _push_ds(".")
-    _call("FIND")
-    _call(">CFA")
-    _call(",")
-
-    _push_ds("EXIT")
-    _call("FIND")
-    _call(">CFA")
-    _call(",")
-
-    _call("MAKE_WORD")
-    _call("BIND")
-end)()
-
--------------------------------------------------------------------------------
--- MAIN LOOP
--------------------------------------------------------------------------------
-
-_add_word("RUN_INTERACTIVE", function ()
+function WORD()
     while true do
-        _call("INTERPRET")
+        if not STDIN_BUFFER then
+            io.write(">>> ")
+            io.flush()
+            STDIN_BUFFER = io.read("*line")
+            if not STDIN_BUFFER then
+                os.exit(0)
+            end
+        end
+        local first, last = STDIN_BUFFER:find("%S+")
+        if first then
+            table.insert(DSTACK, STDIN_BUFFER:sub(first, last))
+            STDIN_BUFFER = STDIN_BUFFER:sub(last+1)
+            return _next()
+        end
     end
-end)
+end
+_add_word("WORD", {}, {WORD})
 
-_call("RUN_INTERACTIVE")
+function DUMP()
+    for idx = #DSTACK,1,-1 do
+        print(string.format("%d: %s", idx, tostring(DSTACK[idx])))
+    end
+    return _next()
+end
+_add_word("DUMP", {}, {DUMP})
+
+function DOT()
+    print(string.format("%d", _popds()))
+    return _next()
+end
+_add_word(".", {}, {DOT})
+
+MYSUB = _cfa(_add_word("MYSUB", {}, {DOCOL, LIT, 1337, DOT, EXIT}))
+MYPROGRAM = _cfa(_add_word("MYPROGRAM", {}, {DOCOL, WORD, LIT, 2, LIT, 3, MEM[MYSUB], LIT, 4, DUMP, EXIT}))
+
+LAST_JMPED_INST = MYPROGRAM
+NEXT_INST = nil
+MEM[MYPROGRAM]()
