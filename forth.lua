@@ -30,7 +30,6 @@ LATEST = nil
 DSTACK = {}
 RSTACK = {}
 NEXT_INST = nil
-LAST_JMPED_INST = nil
 STATE = STATE_IMMEDIATE
 
 --------------------------------------
@@ -39,20 +38,23 @@ local function log(msg, ...)
     print(string.format(msg, ...))
 end
 
+local _docol
+
 -- word header: link, name, flags, fn1, fn2, ...
 local function _add_word(name, flags, code)
     assert(type(code) == "table")
     local OFFSET = #MEM+1
-    log("Word %s code starting at %d", name, OFFSET+3)
     if LATEST ~= nil then
         MEM[LATEST] = OFFSET
     end
-    MEM[OFFSET+0] = nil
-    MEM[OFFSET+1] = name
-    MEM[OFFSET+2] = flags
-    for idx, fn in ipairs(code) do
-        MEM[OFFSET+2 + idx] = fn
+    table.insert(MEM, false) -- false instead of nil for link to avoid sparse arrays
+    table.insert(MEM, name)
+    table.insert(MEM, flags)
+    table.insert(MEM, _docol(#MEM+1))
+    for _, fn in ipairs(code) do
+        table.insert(MEM, fn)
     end
+    table.insert(MEM, EXIT)
     return OFFSET
 end
 
@@ -78,26 +80,27 @@ local function _cfa(offset)
 end
 
 local function _next()
-    LAST_JMPED_INST = NEXT_INST
+    local target = NEXT_INST
     NEXT_INST = NEXT_INST + 1
-    return MEM[LAST_JMPED_INST]()
+    return MEM[target]()
+end
+
+_docol = function(location)
+    local function DOCOL()
+        table.insert(RSTACK, NEXT_INST)
+        NEXT_INST = location + 1
+        return _next()
+    end
+    return DOCOL
 end
 
 function EXIT()
     NEXT_INST = table.remove(RSTACK)
-    log("EXIT popped address %s", NEXT_INST)
     if NEXT_INST ~= nil then
         return _next()
     end
 end
 _add_word("EXIT", {}, {EXIT})
-
-function DOCOL()
-    table.insert(RSTACK, NEXT_INST)
-    NEXT_INST = LAST_JMPED_INST + 1
-    return _next()
-end
-_add_word("DOCOL", {}, {DOCOL})
 
 function LIT()
     local val = MEM[NEXT_INST]
@@ -141,9 +144,8 @@ function DOT()
 end
 _add_word(".", {}, {DOT})
 
-MYSUB = _cfa(_add_word("MYSUB", {}, {DOCOL, LIT, 1337, DOT, EXIT}))
-MYPROGRAM = _cfa(_add_word("MYPROGRAM", {}, {DOCOL, WORD, LIT, 2, LIT, 3, MEM[MYSUB], LIT, 4, DUMP, EXIT}))
+MYSUB = _cfa(_add_word("MYSUB", {}, {LIT, 1337, DOT}))
+MYPROGRAM = _cfa(_add_word("MYPROGRAM", {}, {WORD, LIT, 2, LIT, 3, MEM[MYSUB], LIT, 4, DUMP}))
 
-LAST_JMPED_INST = MYPROGRAM
 NEXT_INST = nil
 MEM[MYPROGRAM]()
