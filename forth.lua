@@ -4,15 +4,15 @@
     vm should be valid and exhibit the same behavior on the final,
     assembly-based vm.
 
-    The main exception here is that
-    Exceptions are:
-    - Handling of strings. Strings are pushed to the data stack directly
-        instead of as start + end addresses
-    - Data
+    The primary difference from jonesforth are:
+    - Support for arbitrary types on the DSTACK + MEM. This is currently
+      used for strings and function flags
+    - Direct threaded code instead of indirect threaded code
 
     Lua supports proper tail calls by default. This is very convenient
-    because it allows to implement the vm with indirect thread code
-    right away.
+    because it allows to implement the vm running (direct/indirect)
+    threaded code right away. The current implementation uses
+    direct threaded code, as MEM[NEXT_INST] is expected to contain
 --]]
 
 --------------------------------------
@@ -85,6 +85,10 @@ local function _next()
     return MEM[target]()
 end
 
+-- Embedding the next location here is required
+-- because this VM currently runs direct threaded
+-- code and a function is not aware
+-- "where it was called from".
 _docol = function(location)
     local function DOCOL()
         table.insert(RSTACK, NEXT_INST)
