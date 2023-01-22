@@ -24,7 +24,7 @@ STATE_COMPILE = 1
 -- VM
 
 MEM = {}
-LATEST = nil
+LATEST = false -- use false instead of nil to avoid sparse arrays
 
 DSTACK = {}
 RSTACK = {}
@@ -33,22 +33,26 @@ CODE_WORD = nil
 STATE = STATE_IMMEDIATE
 
 --------------------------------------
+-- INFRASTRUCTURE
+
+-- These are normal helper functions and intended to be used
+-- from lua code only, and not directly from forth
 
 local function log(msg, ...)
     print(string.format(msg, ...))
 end
 
-local _cfa
+local function _cfa(offset)
+    return offset + 3
+end
 
 -- word header: link, name, flags, fn1, fn2, ...
 local function _create(name, flags)
     local offset = #MEM+1
-    if LATEST ~= nil then
-        MEM[LATEST] = offset
-    end
-    table.insert(MEM, false) -- false instead of nil for link field to avoid sparse arrays
+    table.insert(MEM, LATEST)
     table.insert(MEM, name)
     table.insert(MEM, flags)
+    LATEST = offset
     return offset
 end
 
@@ -82,16 +86,6 @@ local function _add_word(name, flags, code, data)
     return cfa
 end
 
-local function _find(name)
-    local offset = LATEST
-    while offset ~= nil do
-        if MEM[offset + 1] == name then
-            return offset
-        end
-        offset = MEM[offset]
-    end
-end
-
 local function _popds()
     if #DSTACK == 0 then
         error("trying to access empty data stack")
@@ -99,8 +93,8 @@ local function _popds()
     return table.remove(DSTACK)
 end
 
-_cfa = function (offset)
-    return offset + 3
+local function _pushds(value)
+    table.insert(DSTACK, value)
 end
 
 local function _start_vm(code_word)
@@ -111,35 +105,101 @@ end
 
 -- Interpreter for indirect threaded code
 local function _next()
+    -- Our return stack is still a mess at this point, so we need this
+    if NEXT_INST == nil then
+        return
+    end
     CODE_WORD = MEM[NEXT_INST]
     NEXT_INST = NEXT_INST + 1
     return MEM[CODE_WORD]()
 end
 
-function _DOCOL()
+local function _wrap_next(fn)
+    return function() fn() return _next() end
+end
+
+--------------------------------------
+-- WORD DEFINITIONS
+
+-- All of these operate on the data/return stack and can
+-- be used from lua (via the _* functions) or from forth
+-- via the REPL or the pointer to code worde returned by
+-- _add_word
+
+local function DOCOL()
     table.insert(RSTACK, NEXT_INST)
     NEXT_INST = CODE_WORD + 1
     return _next()
 end
-DOCOL = _DOCOL
 
-function _EXIT()
+local function _EXIT()
     NEXT_INST = table.remove(RSTACK)
-    if NEXT_INST ~= nil then
-        return _next()
-    end
 end
-EXIT = _add_word("EXIT", {}, _EXIT)
+EXIT = _add_word("EXIT", {}, _wrap_next(_EXIT))
 
-function _LIT()
+local function _FIND()
+    local name = _popds()
+    local offset = LATEST
+    while offset do
+        if MEM[offset + 1] == name then
+            _pushds(offset)
+            return
+        end
+        offset = MEM[offset]
+    end
+    _pushds(0)
+end
+FIND = _add_word("FIND", {}, _wrap_next(_FIND))
+
+local function _CFA()
+    local offset = _popds()
+    _pushds(_cfa(offset))
+end
+CFA = _add_word(">CFA", {}, _wrap_next(_CFA))
+
+local function _DUP()
+    local val = _popds()
+    _pushds(val)
+    _pushds(val)
+end
+DUP = _add_word("DUP", {}, _wrap_next(_DUP))
+
+local function _DROP()
+    _popds()
+end
+DROP = _add_word("DROP", {}, _wrap_next(_DROP))
+
+local function _SWAP()
+    local v1 = _popds()
+    local v2 = _popds()
+    _pushds(v1)
+    _pushds(v2)
+end
+SWAP = _add_word("SWAP", {}, _wrap_next(_SWAP))
+
+local function _ADD()
+    local v1 = _popds()
+    local v2 = _popds()
+    _pushds(v1 + v2)
+end
+ADD = _add_word("+", {}, _wrap_next(_ADD))
+
+local function _SUB()
+    local v1 = _popds()
+    local v2 = _popds()
+    _pushds(v2 - v1)
+end
+_add_word("-", {}, _wrap_next(_SUB))
+
+
+local function _LIT()
     local val = MEM[NEXT_INST]
     table.insert(DSTACK, val)
     NEXT_INST = NEXT_INST + 1
-    return _next()
 end
-LIT = _add_word("LIT", {}, _LIT)
+LIT = _add_word("LIT", {}, _wrap_next(_LIT))
 
-function _WORD()
+local function _WORD()
     while true do
         if not STDIN_BUFFER then
             io.write(">>> ")
@@ -153,27 +213,61 @@ function _WORD()
         if first then
             table.insert(DSTACK, STDIN_BUFFER:sub(first, last))
             STDIN_BUFFER = STDIN_BUFFER:sub(last+1)
-            return _next()
+            return
+        else
+            STDIN_BUFFER = nil
         end
     end
 end
-WORD = _add_word("WORD", {}, _WORD)
+WORD = _add_word("WORD", {}, _wrap_next(_WORD))
 
-function _DUMP()
+local function _NUMBER()
+    local value = _popds()
+    local number = tonumber(value)
+    if not number then
+        error(string.format("Unable to parse '%s' as number", value))
+    end
+    _pushds(number)
+end
+NUMBER = _add_word("NUMBER", {}, _wrap_next(_NUMBER))
+
+local function _DUMP()
     for idx = #DSTACK,1,-1 do
         print(string.format("%d: %s", idx, tostring(DSTACK[idx])))
     end
-    return _next()
 end
-DUMP = _add_word("DUMP", {}, _DUMP)
+DUMP = _add_word("DUMP", {}, _wrap_next(_DUMP))
 
-function _DOT()
+local function _DOT()
     print(string.format("%d", _popds()))
-    return _next()
 end
-DOT = _add_word(".", {}, _DOT)
+DOT = _add_word(".", {}, _wrap_next(_DOT))
+
+local function _INTERPRET()
+    _WORD()
+    _DUP()
+    _FIND()
+    local entry = _popds()
+    if entry == 0 then
+        _NUMBER()
+    else
+        _DROP()
+        _pushds(entry)
+        _CFA()
+        CODE_WORD = _popds()
+        MEM[CODE_WORD]()
+    end
+end
+INTERPRET = _add_word("INTERPRET", {}, _wrap_next(_INTERPRET))
+
+function _MAIN()
+    while true do
+        _INTERPRET()
+    end
+end
+MAIN = _add_word("MAIN", {}, _wrap_next(_MAIN))
 
 MYSUB = _add_word("MYSUB", {}, DOCOL, {LIT, 1337, DOT, EXIT})
 MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {WORD, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
 
-_start_vm(MYPROGRAM)
+_start_vm(MAIN)
