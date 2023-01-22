@@ -7,7 +7,7 @@
     The primary difference from jonesforth are:
     - Implemented in lua, not assembly
     - Support for arbitrary types on the DSTACK + MEM. This is currently
-      used for strings and function flags
+      used for strings, booleans, and function flags
 
     Lua supports proper tail calls by default. This is very convenient
     because it allows a straight forward implmenetation of the VM running
@@ -157,6 +157,13 @@ local function _CFA()
 end
 CFA = _add_word(">CFA", {}, _wrap_next(_CFA))
 
+local function _ISIMMEDIATE()
+    local entry_offset = _popds()
+    local flags = MEM[entry_offset + 2]
+    _pushds(flags.immediate or false)
+end
+ISIMMEDIATE = _add_word("ISIMMEDIATE", {}, _wrap_next(_ISIMMEDIATE))
+
 local function _DUP()
     local val = _popds()
     _pushds(val)
@@ -251,10 +258,55 @@ local function _DOT()
 end
 DOT = _add_word(".", {}, _wrap_next(_DOT))
 
+local function _COMMA()
+    MEM[#MEM+1] = _popds()
+end
+COMMA = _add_word(",", {}, _wrap_next(_COMMA))
+
+local function _LBRAC()
+    STATE = STATE_IMMEDIATE
+end
+LBRAC = _add_word("[", {}, _wrap_next(_LBRAC))
+
+local function _RBRAC()
+    STATE = STATE_COMPILE
+end
+RBRAC = _add_word("]", {}, _wrap_next(_RBRAC))
+
 local function _BRANCH()
     NEXT_INST = NEXT_INST + MEM[NEXT_INST]
 end
 BRANCH = _add_word("BRANCH", {}, _wrap_next(_BRANCH))
+
+local function _CREATE()
+    local name = _popds()
+    local flags = {}
+    _create(name, flags)
+end
+CREATE = _add_word("CREATE", {}, _wrap_next(_CREATE))
+
+COLON = _add_word(":", {}, DOCOL, {
+    WORD, CREATE,
+    LIT, DOCOL, COMMA,
+    RBRAC,
+    EXIT
+})
+
+SEMICOLON = _add_word(";", { immediate = true }, DOCOL, {
+    LIT, EXIT, COMMA,
+    LBRAC,
+    EXIT
+})
+
+local function _PEEKMEM()
+    local length = _popds()
+    local copy = {}
+    for i = #MEM-length,#MEM,1 do
+        table.insert(copy, MEM[i])
+    end
+    print(_format_data(copy))
+end
+PEEKMEM = _add_word("PEEKMEM", {}, _wrap_next(_PEEKMEM))
 
 local function _INTERPRET()
     _WORD()
@@ -263,20 +315,38 @@ local function _INTERPRET()
     local entry = _popds()
     if entry == 0 then
         _NUMBER()
+        if STATE == STATE_COMPILE then
+            _pushds(LIT)
+            _COMMA()
+            _COMMA()
+        end
     else
         _DROP()
         _pushds(entry)
-        _CFA()
-        CODE_WORD = _popds()
-        MEM[CODE_WORD]()
+        if STATE == STATE_IMMEDIATE then
+            _CFA()
+            CODE_WORD = _popds()
+            return MEM[CODE_WORD]()
+        else
+            _DUP()
+            _ISIMMEDIATE()
+            local is_immediate = _popds()
+            _CFA()
+            if is_immediate then
+                CODE_WORD = _popds()
+                return MEM[CODE_WORD]()
+            else
+                _COMMA()
+            end
+        end
     end
 end
 INTERPRET = _add_word("INTERPRET", {}, _wrap_next(_INTERPRET))
 
-MAIN = _add_word("MAIN", {}, DOCOL, {INTERPRET, BRANCH, -2, EXIT})
+QUIT = _add_word("QUIT", {}, DOCOL, {INTERPRET, BRANCH, -2, EXIT})
 
 MYSUB = _add_word("MYSUB", {}, DOCOL, {LIT, 1337, DOT, EXIT})
 MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Enter something:", TELL, WORD, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
 BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
 
-_start_vm(MAIN)
+_start_vm(QUIT)
