@@ -50,7 +50,7 @@ end
 local function _create(name, flags)
     local offset = #MEM+1
     table.insert(MEM, LATEST)
-    table.insert(MEM, name)
+    table.insert(MEM, string.upper(name))
     table.insert(MEM, flags)
     LATEST = offset
     return offset
@@ -138,7 +138,7 @@ end
 EXIT = _add_word("EXIT", {}, _wrap_next(_EXIT))
 
 local function _FIND()
-    local name = _popds()
+    local name = string.upper(_popds())
     local offset = LATEST
     while offset do
         if MEM[offset + 1] == name then
@@ -191,13 +191,21 @@ local function _SUB()
 end
 _add_word("-", {}, _wrap_next(_SUB))
 
-
 local function _LIT()
     local val = MEM[NEXT_INST]
     table.insert(DSTACK, val)
     NEXT_INST = NEXT_INST + 1
 end
 LIT = _add_word("LIT", {}, _wrap_next(_LIT))
+
+-- Strings can be pushed directly onto the stack, hence _LIT
+-- can be repurposed for strings as well
+LITSTRING = _add_word("LITSTRING", {}, _wrap_next(_LIT))
+
+local function _TELL()
+    print(_popds())
+end
+TELL = _add_word("TELL", {}, _wrap_next(_TELL))
 
 local function _WORD()
     while true do
@@ -243,6 +251,11 @@ local function _DOT()
 end
 DOT = _add_word(".", {}, _wrap_next(_DOT))
 
+local function _BRANCH()
+    NEXT_INST = NEXT_INST + MEM[NEXT_INST]
+end
+BRANCH = _add_word("BRANCH", {}, _wrap_next(_BRANCH))
+
 local function _INTERPRET()
     _WORD()
     _DUP()
@@ -260,14 +273,10 @@ local function _INTERPRET()
 end
 INTERPRET = _add_word("INTERPRET", {}, _wrap_next(_INTERPRET))
 
-function _MAIN()
-    while true do
-        _INTERPRET()
-    end
-end
-MAIN = _add_word("MAIN", {}, _wrap_next(_MAIN))
+MAIN = _add_word("MAIN", {}, DOCOL, {INTERPRET, BRANCH, -2, EXIT})
 
 MYSUB = _add_word("MYSUB", {}, DOCOL, {LIT, 1337, DOT, EXIT})
-MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {WORD, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
+MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Enter something:", TELL, WORD, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
+BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
 
 _start_vm(MAIN)
