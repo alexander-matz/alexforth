@@ -24,7 +24,9 @@ STATE_COMPILE = 1
 -- VM
 
 MEM = {}
-LATEST = false -- use false instead of nil to avoid sparse arrays
+
+MEM[#MEM+1] = 0
+local _LATEST_ADDR = #MEM
 
 DSTACK = {}
 RSTACK = {}
@@ -49,10 +51,10 @@ end
 -- word header: link, name, flags, fn1, fn2, ...
 local function _create(name, flags)
     local offset = #MEM+1
-    table.insert(MEM, LATEST)
+    table.insert(MEM, MEM[_LATEST_ADDR])
     table.insert(MEM, string.upper(name))
     table.insert(MEM, flags)
-    LATEST = offset
+    MEM[_LATEST_ADDR] = offset
     return offset
 end
 
@@ -126,6 +128,8 @@ end
 -- via the REPL or the pointer to code worde returned by
 -- _add_word
 
+--------------------------------------
+
 local function DOCOL()
     table.insert(RSTACK, NEXT_INST)
     NEXT_INST = CODE_WORD + 1
@@ -135,12 +139,108 @@ end
 local function _EXIT()
     NEXT_INST = table.remove(RSTACK)
 end
-EXIT = _add_word("EXIT", {}, _wrap_next(_EXIT))
+local EXIT = _add_word("EXIT", {}, _wrap_next(_EXIT))
+
+local function VARADDR()
+    _pushds(CODE_WORD + 1)
+    return _next()
+end
+
+-- ( A -- A A )
+local function _DUP()
+    local val = _popds()
+    _pushds(val)
+    _pushds(val)
+end
+local DUP = _add_word("DUP", {}, _wrap_next(_DUP))
+
+-- ( A -- )
+local function _DROP()
+    _popds()
+end
+local DROP = _add_word("DROP", {}, _wrap_next(_DROP))
+
+-- ( A B -- B A )
+local function _SWAP()
+    local v1 = _popds()
+    local v2 = _popds()
+    _pushds(v1)
+    _pushds(v2)
+end
+local SWAP = _add_word("SWAP", {}, _wrap_next(_SWAP))
+
+-- ( A B -- A B A )
+local function _OVER()
+    local v1 = _popds()
+    local v2 = _popds()
+    _pushds(v2)
+    _pushds(v1)
+    _pushds(v2)
+end
+local OVER = _add_word("OVER", {}, _wrap_next(_OVER))
+
+-- ( A B -- A B A B )
+local function _TWODUP()
+    local v1 = _popds()
+    local v2 = _popds()
+    _pushds(v2)
+    _pushds(v1)
+    _pushds(v2)
+    _pushds(v1)
+end
+local TWODUP = _add_word("2DUP", {}, _wrap_next(_TWODUP))
+
+-- ( A B -- )
+local function _TWODROP()
+    _popds()
+    _popds()
+end
+local TWODROP = _add_word("2DROP", {}, _wrap_next(_TWODROP))
+
+-- ( A B C D -- C D A B )
+local function _TWOSWAP()
+    local v1 = _popds()
+    local v2 = _popds()
+    local v3 = _popds()
+    local v4 = _popds()
+    _pushds(v2)
+    _pushds(v1)
+    _pushds(v4)
+    _pushds(v3)
+end
+local TWOSWAP = _add_word("2SWAP", {}, _wrap_next(_TWOSWAP))
+
+local function _LIT()
+    local val = MEM[NEXT_INST]
+    table.insert(DSTACK, val)
+    NEXT_INST = NEXT_INST + 1
+end
+local LIT = _add_word("LIT", {}, _wrap_next(_LIT))
+
+local LATEST = _add_word("LATEST", {}, DOCOL, {LIT, _LATEST_ADDR, EXIT})
+
+local function _FETCH()
+    local offset = _popds()
+    _pushds(MEM[offset])
+end
+local FETCH = _add_word("@", {}, _wrap_next(_FETCH))
+
+local function _STORE()
+    local offset = _popds()
+    local value = _popds()
+    MEM[offset] = value
+end
+local STORE = _add_word("!", {}, _wrap_next(_STORE))
+
+local function _HERE()
+    _pushds(#MEM+1)
+end
+local HERE = _add_word("HERE", {}, _wrap_next(_HERE))
 
 local function _FIND()
     local name = string.upper(_popds())
-    local offset = LATEST
-    while offset do
+    local offset = MEM[_LATEST_ADDR]
+    while offset ~= 0 do
         if MEM[offset + 1] == name then
             _pushds(offset)
             return
@@ -149,70 +249,54 @@ local function _FIND()
     end
     _pushds(0)
 end
-FIND = _add_word("FIND", {}, _wrap_next(_FIND))
+local FIND = _add_word("FIND", {}, _wrap_next(_FIND))
 
 local function _CFA()
     local offset = _popds()
     _pushds(_cfa(offset))
 end
-CFA = _add_word(">CFA", {}, _wrap_next(_CFA))
+local CFA = _add_word(">CFA", {}, _wrap_next(_CFA))
 
 local function _ISIMMEDIATE()
     local entry_offset = _popds()
     local flags = MEM[entry_offset + 2]
     _pushds(flags.immediate or false)
 end
-ISIMMEDIATE = _add_word("ISIMMEDIATE", {}, _wrap_next(_ISIMMEDIATE))
-
-local function _DUP()
-    local val = _popds()
-    _pushds(val)
-    _pushds(val)
-end
-DUP = _add_word("DUP", {}, _wrap_next(_DUP))
-
-local function _DROP()
-    _popds()
-end
-DROP = _add_word("DROP", {}, _wrap_next(_DROP))
-
-local function _SWAP()
-    local v1 = _popds()
-    local v2 = _popds()
-    _pushds(v1)
-    _pushds(v2)
-end
-SWAP = _add_word("SWAP", {}, _wrap_next(_SWAP))
+local ISIMMEDIATE = _add_word("ISIMMEDIATE", {}, _wrap_next(_ISIMMEDIATE))
 
 local function _ADD()
     local v1 = _popds()
     local v2 = _popds()
     _pushds(v1 + v2)
 end
-ADD = _add_word("+", {}, _wrap_next(_ADD))
+local ADD = _add_word("+", {}, _wrap_next(_ADD))
+
 
 local function _SUB()
     local v1 = _popds()
     local v2 = _popds()
     _pushds(v2 - v1)
 end
-_add_word("-", {}, _wrap_next(_SUB))
+local SUB = _add_word("-", {}, _wrap_next(_SUB))
 
-local function _LIT()
-    local val = MEM[NEXT_INST]
-    table.insert(DSTACK, val)
-    NEXT_INST = NEXT_INST + 1
-end
-LIT = _add_word("LIT", {}, _wrap_next(_LIT))
+-- ( n var - )
+local ADDSTORE = _add_word("+!", {}, DOCOL, {
+    SWAP, OVER, FETCH, ADD, SWAP, STORE, EXIT
+})
+
+-- ( n var - )
+local SUBSTORE = _add_word("-!", {}, DOCOL, {
+    SWAP, OVER, FETCH, SUB, SWAP, STORE, EXIT
+})
 
 -- Strings can be pushed directly onto the stack, hence _LIT
 -- can be repurposed for strings as well
-LITSTRING = _add_word("LITSTRING", {}, _wrap_next(_LIT))
+local LITSTRING = _add_word("LITSTRING", {}, _wrap_next(_LIT))
 
 local function _TELL()
     print(_popds())
 end
-TELL = _add_word("TELL", {}, _wrap_next(_TELL))
+local TELL = _add_word("TELL", {}, _wrap_next(_TELL))
 
 local function _WORD()
     while true do
@@ -234,7 +318,7 @@ local function _WORD()
         end
     end
 end
-WORD = _add_word("WORD", {}, _wrap_next(_WORD))
+local WORD = _add_word("WORD", {}, _wrap_next(_WORD))
 
 local function _NUMBER()
     local value = _popds()
@@ -244,55 +328,72 @@ local function _NUMBER()
     end
     _pushds(number)
 end
-NUMBER = _add_word("NUMBER", {}, _wrap_next(_NUMBER))
+local NUMBER = _add_word("NUMBER", {}, _wrap_next(_NUMBER))
 
 local function _DUMP()
     for idx = #DSTACK,1,-1 do
         print(string.format("%d: %s", idx, tostring(DSTACK[idx])))
     end
 end
-DUMP = _add_word("DUMP", {}, _wrap_next(_DUMP))
+local DUMP = _add_word("DUMP", {}, _wrap_next(_DUMP))
 
 local function _DOT()
     print(string.format("%d", _popds()))
 end
-DOT = _add_word(".", {}, _wrap_next(_DOT))
+local DOT = _add_word(".", {}, _wrap_next(_DOT))
 
 local function _COMMA()
     MEM[#MEM+1] = _popds()
 end
-COMMA = _add_word(",", {}, _wrap_next(_COMMA))
+local COMMA = _add_word(",", {}, _wrap_next(_COMMA))
 
 local function _LBRAC()
     STATE = STATE_IMMEDIATE
 end
-LBRAC = _add_word("[", {}, _wrap_next(_LBRAC))
+local LBRAC = _add_word("[", {}, _wrap_next(_LBRAC))
 
 local function _RBRAC()
     STATE = STATE_COMPILE
 end
-RBRAC = _add_word("]", {}, _wrap_next(_RBRAC))
+local RBRAC = _add_word("]", {}, _wrap_next(_RBRAC))
 
 local function _BRANCH()
     NEXT_INST = NEXT_INST + MEM[NEXT_INST]
 end
-BRANCH = _add_word("BRANCH", {}, _wrap_next(_BRANCH))
+local BRANCH = _add_word("BRANCH", {}, _wrap_next(_BRANCH))
+
+local function _ZBRANCH()
+    local test = _popds()
+    if test == 0 or test == false then
+        NEXT_INST = NEXT_INST + MEM[NEXT_INST]
+    else
+        NEXT_INST = NEXT_INST + 1
+    end
+end
+local ZBRANCH = _add_word("0BRANCH", {}, _wrap_next(_ZBRANCH))
 
 local function _CREATE()
     local name = _popds()
     local flags = {}
     _create(name, flags)
 end
-CREATE = _add_word("CREATE", {}, _wrap_next(_CREATE))
+local CREATE = _add_word("CREATE", {}, _wrap_next(_CREATE))
 
-COLON = _add_word(":", {}, DOCOL, {
+local VARIABLE = _add_word("VARIABLE", {}, DOCOL, {
+    WORD, CREATE,
+    LIT, VARADDR, COMMA,
+    LIT, 0, COMMA,
+    EXIT
+})
+
+local COLON = _add_word(":", {}, DOCOL, {
     WORD, CREATE,
     LIT, DOCOL, COMMA,
     RBRAC,
     EXIT
 })
 
-SEMICOLON = _add_word(";", { immediate = true }, DOCOL, {
+local SEMICOLON = _add_word(";", { immediate = true }, DOCOL, {
     LIT, EXIT, COMMA,
     LBRAC,
     EXIT
@@ -306,7 +407,7 @@ local function _PEEKMEM()
     end
     print(_format_data(copy))
 end
-PEEKMEM = _add_word("PEEKMEM", {}, _wrap_next(_PEEKMEM))
+local PEEKMEM = _add_word("PEEKMEM", {}, _wrap_next(_PEEKMEM))
 
 local function _INTERPRET()
     _WORD()
@@ -341,12 +442,13 @@ local function _INTERPRET()
         end
     end
 end
-INTERPRET = _add_word("INTERPRET", {}, _wrap_next(_INTERPRET))
+local INTERPRET = _add_word("INTERPRET", {}, _wrap_next(_INTERPRET))
 
 QUIT = _add_word("QUIT", {}, DOCOL, {INTERPRET, BRANCH, -2, EXIT})
 
 MYSUB = _add_word("MYSUB", {}, DOCOL, {LIT, 1337, DOT, EXIT})
-MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Enter something:", TELL, WORD, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
+MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Some String", TELL, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
+TESTVAR = _add_word("TESTVAR", {}, VARADDR, {0})
 BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
 
 _start_vm(QUIT)
