@@ -15,24 +15,20 @@
 --]]
 
 --------------------------------------
--- CONSTANTS
-
-STATE_IMMEDIATE = 0
-STATE_COMPILE = 1
-
---------------------------------------
 -- VM
 
 MEM = {}
 
-MEM[#MEM+1] = 0
+MEM[#MEM+1] = 0;
 local _LATEST_ADDR = #MEM
+
+MEM[#MEM+1] = 0; -- STATE = 0 -> immediate, STATE = 1 -> compile
+local _STATE_ADDR = #MEM
 
 DSTACK = {}
 RSTACK = {}
 NEXT_INST = nil
 CODE_WORD = nil
-STATE = STATE_IMMEDIATE
 
 --------------------------------------
 -- INFRASTRUCTURE
@@ -218,6 +214,7 @@ end
 local LIT = _add_word("LIT", {}, _wrap_next(_LIT))
 
 local LATEST = _add_word("LATEST", {}, DOCOL, {LIT, _LATEST_ADDR, EXIT})
+local STATE = _add_word("STATE", {}, DOCOL, {LIT, _STATE_ADDR, EXIT})
 
 local function _FETCH()
     local offset = _popds()
@@ -298,25 +295,55 @@ local function _TELL()
 end
 local TELL = _add_word("TELL", {}, _wrap_next(_TELL))
 
-local function _WORD()
-    while true do
-        if not STDIN_BUFFER then
-            io.write(">>> ")
-            io.flush()
-            STDIN_BUFFER = io.read("*line")
-            if not STDIN_BUFFER then
-                os.exit(0)
-            end
-        end
-        local first, last = STDIN_BUFFER:find("%S+")
-        if first then
-            table.insert(DSTACK, STDIN_BUFFER:sub(first, last))
-            STDIN_BUFFER = STDIN_BUFFER:sub(last+1)
-            return
-        else
-            STDIN_BUFFER = nil
-        end
+local _STDIN_BUFFER = nil
+local _STDIN_POS = nil
+
+local function _PROMPT()
+    io.write(">>> ")
+    io.flush()
+    _STDIN_BUFFER = io.read("*line")
+    if not _STDIN_BUFFER then
+        os.exit(0)
     end
+    _STDIN_BUFFER = _STDIN_BUFFER .. '\n'
+    _STDIN_POS = 1
+end
+
+local function _KEY()
+    if not _STDIN_BUFFER or _STDIN_POS > #_STDIN_BUFFER then
+        _PROMPT()
+    end
+    _pushds(string.sub(_STDIN_BUFFER, _STDIN_POS, _STDIN_POS))
+    _STDIN_POS = _STDIN_POS + 1
+end
+KEY = _add_word("KEY", {}, _wrap_next(_KEY))
+
+local function _ISWS()
+    local ch = _popds()
+    _pushds(ch == ' ' or ch == '\n' or ch == '\t')
+end
+ISWS = _add_word("ISWS", {}, _wrap_next(_ISWS))
+
+local function _WORD()
+    local function _KEY_CHECK()
+        _KEY()
+        _DUP()
+        _ISWS()
+    end
+    _KEY_CHECK()
+    while _popds() do
+        _popds()
+        _KEY_CHECK()
+    end
+    local buf = { _popds() }
+    _KEY_CHECK()
+    while not _popds() do
+        table.insert(buf, _popds())
+        _KEY_CHECK()
+    end
+    _popds()
+    local word = table.concat(buf)
+    _pushds(word)
 end
 local WORD = _add_word("WORD", {}, _wrap_next(_WORD))
 
@@ -347,15 +374,8 @@ local function _COMMA()
 end
 local COMMA = _add_word(",", {}, _wrap_next(_COMMA))
 
-local function _LBRAC()
-    STATE = STATE_IMMEDIATE
-end
-local LBRAC = _add_word("[", {}, _wrap_next(_LBRAC))
-
-local function _RBRAC()
-    STATE = STATE_COMPILE
-end
-local RBRAC = _add_word("]", {}, _wrap_next(_RBRAC))
+local LBRAC = _add_word("[", {}, DOCOL, { LIT, 0, STATE, STORE, EXIT })
+local RBRAC = _add_word("]", {}, DOCOL, { LIT, 1, STATE, STORE, EXIT })
 
 local function _BRANCH()
     NEXT_INST = NEXT_INST + MEM[NEXT_INST]
@@ -416,7 +436,7 @@ local function _INTERPRET()
     local entry = _popds()
     if entry == 0 then
         _NUMBER()
-        if STATE == STATE_COMPILE then
+        if MEM[_STATE_ADDR] == 1 then -- compile
             _pushds(LIT)
             _COMMA()
             _COMMA()
@@ -424,7 +444,7 @@ local function _INTERPRET()
     else
         _DROP()
         _pushds(entry)
-        if STATE == STATE_IMMEDIATE then
+        if MEM[_STATE_ADDR] == 0 then -- immediate
             _CFA()
             CODE_WORD = _popds()
             return MEM[CODE_WORD]()
