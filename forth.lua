@@ -297,6 +297,17 @@ local function _SUB()
 end
 local SUB = _add_word("-", {}, _wrap_next(_SUB))
 
+local function _EQ()
+    local v1 = _popds()
+    local v2 = _popds()
+    if v2 == v1 then
+        _pushds(1)
+    else
+        _pushds(0)
+    end
+end
+local EQ = _add_word("=", {}, _wrap_next(_EQ))
+
 local function _NOT()
     local val = _popds()
     _pushds(val == 0 or not val)
@@ -352,7 +363,8 @@ local SUBSTORE = _add_word("-!", {}, DOCOL, {
 local LITSTRING = _add_word("LITSTRING", {}, _wrap_next(_LIT))
 
 local function _TELL()
-    print(_popds())
+    io.write(_popds())
+    io.flush()
 end
 local TELL = _add_word("TELL", {}, _wrap_next(_TELL))
 
@@ -422,7 +434,7 @@ end
 local DUMP = _add_word("DUMP", {}, _wrap_next(_DUMP))
 
 local function _DOT()
-    print(string.format("%d", _popds()))
+    io.write(string.format("%d", _popds()))
 end
 local DOT = _add_word(".", {}, _wrap_next(_DOT))
 
@@ -455,6 +467,42 @@ local SEMICOLON = _add_word(";", { immediate = true }, DOCOL, {
     LBRAC,
     EXIT
 })
+
+-- ( addr -- str )
+local function _FINDNAME()
+    local code_word = _popds()
+    _pushds(_resolve_codeword())
+end
+local FINDNAME = _add_word("FINDNAME", {}, _wrap_next(_FINDNAME))
+
+-- ( addr -- )
+local function _DECOMPILE()
+    local entry = _popds()
+    io.write(string.format("Definition of %s: ", MEM[entry + 1]))
+    if MEM[entry+3] ~= DOCOL then
+        io.write("[native word]\n")
+        return
+    end
+    local data_fields = {
+        [LIT] = 1,
+        [LITSTRING] = 1,
+        [BRANCH] = 1,
+        [ZBRANCH] = 1,
+    }
+    local pos = entry+4
+    repeat
+        io.write(_resolve_codeword(MEM[pos]) .. " ")
+
+        local dfields = data_fields[MEM[pos]] or 0
+        for _ = 1,dfields,1 do
+            pos = pos + 1
+            io.write(string.format("%s ", MEM[pos]))
+        end
+        pos = pos + 1
+    until MEM[pos] == EXIT or MEM[pos] == nil
+    io.write(_resolve_codeword(MEM[pos]) .. "\n")
+end
+local DECOMPILE = _add_word("DECOMPILE", {}, _wrap_next(_DECOMPILE))
 
 local function _PEEKMEM()
     local length = _popds()
@@ -504,7 +552,7 @@ local INTERPRET = _add_word("INTERPRET", {}, _wrap_next(_INTERPRET))
 QUIT = _add_word("QUIT", {}, DOCOL, {INTERPRET, BRANCH, -2, EXIT})
 
 MYSUB = _add_word("MYSUB", {}, DOCOL, {LIT, 1337, DOT, EXIT})
-MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Some String", TELL, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
+MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Some String\n", TELL, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
 TESTVAR = _add_word("TESTVAR", {}, VARADDR, {0})
 BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
 
