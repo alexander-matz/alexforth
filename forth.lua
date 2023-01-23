@@ -30,6 +30,12 @@ RSTACK = {}
 NEXT_INST = nil
 CODE_WORD = nil
 
+local _codeword_to_name = {}
+local function _resolve_codeword(code_word)
+    local name = _codeword_to_name[code_word]
+    return name or "N/A"
+end
+
 --------------------------------------
 -- INFRASTRUCTURE
 
@@ -51,6 +57,7 @@ local function _create(name, flags)
     table.insert(MEM, string.upper(name))
     table.insert(MEM, flags)
     MEM[_LATEST_ADDR] = offset
+    _codeword_to_name[_cfa(offset)] = name
     return offset
 end
 
@@ -136,6 +143,21 @@ local function _EXIT()
     NEXT_INST = table.remove(RSTACK)
 end
 local EXIT = _add_word("EXIT", {}, _wrap_next(_EXIT))
+
+-- This is a bit awkward, we need a total of three functions
+-- to call forth words from native words:
+-- - STOP ensures we don't end on a tailcall to _next and jumps back to the native word
+-- - RUN to provide the regular data layout expected by the interpreter. The data field
+--    is updated to point to the code word of the forth entry we want to call
+-- - _run to actually set up rstack, next_inst, and kick off execution
+local STOP = _add_word("STOP", {}, _EXIT)
+local RUN = _add_word("RUN", {}, DOCOL, { 0, STOP })
+local function _run(code_word)
+    table.insert(RSTACK, NEXT_INST)
+    MEM[RUN+1] = code_word
+    NEXT_INST = RUN+1
+    return _next()
+end
 
 local function VARADDR()
     _pushds(CODE_WORD + 1)
@@ -268,13 +290,52 @@ local function _ADD()
 end
 local ADD = _add_word("+", {}, _wrap_next(_ADD))
 
-
 local function _SUB()
     local v1 = _popds()
     local v2 = _popds()
     _pushds(v2 - v1)
 end
 local SUB = _add_word("-", {}, _wrap_next(_SUB))
+
+local function _NOT()
+    local val = _popds()
+    _pushds(val == 0 or not val)
+end
+local NOT = _add_word("NOT", {}, _wrap_next(_NOT))
+
+local INC = _add_word("+1", {}, DOCOL, {LIT, 1, ADD, EXIT})
+
+local function _BRANCH()
+    NEXT_INST = NEXT_INST + MEM[NEXT_INST]
+end
+local BRANCH = _add_word("BRANCH", {}, _wrap_next(_BRANCH))
+
+local function _ZBRANCH()
+    local test = _popds()
+    if test == 0 or test == false then
+        NEXT_INST = NEXT_INST + MEM[NEXT_INST]
+    else
+        NEXT_INST = NEXT_INST + 1
+    end
+end
+local ZBRANCH = _add_word("0BRANCH", {}, _wrap_next(_ZBRANCH))
+
+local function _COMMA()
+    MEM[#MEM+1] = _popds()
+end
+local COMMA = _add_word(",", {}, _wrap_next(_COMMA))
+
+-- ( ch1 ch2 ... chn n -- str)
+-- This is terrible, but using MEM as scratch requires mutable HERE
+local function _MAKESTRING()
+    local count = _popds()
+    local buf = {}
+    for _ = count,1,-1 do
+        table.insert(buf, _popds())
+    end
+    _pushds(string.reverse(table.concat(buf)))
+end
+local MAKESTRING = _add_word("MAKESTRING", {}, _wrap_next(_MAKESTRING))
 
 -- ( n var - )
 local ADDSTORE = _add_word("+!", {}, DOCOL, {
@@ -324,28 +385,24 @@ local function _ISWS()
 end
 ISWS = _add_word("ISWS", {}, _wrap_next(_ISWS))
 
-local function _WORD()
-    local function _KEY_CHECK()
-        _KEY()
-        _DUP()
-        _ISWS()
-    end
-    _KEY_CHECK()
-    while _popds() do
-        _popds()
-        _KEY_CHECK()
-    end
-    local buf = { _popds() }
-    _KEY_CHECK()
-    while not _popds() do
-        table.insert(buf, _popds())
-        _KEY_CHECK()
-    end
-    _popds()
-    local word = table.concat(buf)
-    _pushds(word)
-end
-local WORD = _add_word("WORD", {}, _wrap_next(_WORD))
+local WORD = _add_word("WORD", {}, DOCOL,{
+    -- counter for how number chars we have on the stack
+    LIT, 0,
+
+    KEY,
+    -- if not whitespace, escape loop
+    DUP, ISWS, ZBRANCH, 4,
+    -- else drop char and repeat
+    DROP, BRANCH, -7,
+
+    -- build buffer
+    SWAP, INC,
+    KEY, DUP, ISWS,
+    ZBRANCH, -6,
+
+    DROP, MAKESTRING,
+    EXIT
+})
 
 local function _NUMBER()
     local value = _popds()
@@ -369,28 +426,8 @@ local function _DOT()
 end
 local DOT = _add_word(".", {}, _wrap_next(_DOT))
 
-local function _COMMA()
-    MEM[#MEM+1] = _popds()
-end
-local COMMA = _add_word(",", {}, _wrap_next(_COMMA))
-
 local LBRAC = _add_word("[", {}, DOCOL, { LIT, 0, STATE, STORE, EXIT })
 local RBRAC = _add_word("]", {}, DOCOL, { LIT, 1, STATE, STORE, EXIT })
-
-local function _BRANCH()
-    NEXT_INST = NEXT_INST + MEM[NEXT_INST]
-end
-local BRANCH = _add_word("BRANCH", {}, _wrap_next(_BRANCH))
-
-local function _ZBRANCH()
-    local test = _popds()
-    if test == 0 or test == false then
-        NEXT_INST = NEXT_INST + MEM[NEXT_INST]
-    else
-        NEXT_INST = NEXT_INST + 1
-    end
-end
-local ZBRANCH = _add_word("0BRANCH", {}, _wrap_next(_ZBRANCH))
 
 local function _CREATE()
     local name = _popds()
@@ -430,7 +467,7 @@ end
 local PEEKMEM = _add_word("PEEKMEM", {}, _wrap_next(_PEEKMEM))
 
 local function _INTERPRET()
-    _WORD()
+    _run(WORD)
     _DUP()
     _FIND()
     local entry = _popds()
