@@ -463,9 +463,12 @@ local function _NUMBER()
     local value = _popds()
     local number = tonumber(value)
     if not number then
-        error(string.format("Unable to parse '%s' as number", value))
+        _pushds(0)
+        _pushds(0)
+        return
     end
     _pushds(number)
+    _pushds(1)
 end
 local NUMBER = _add_word("NUMBER", {}, _wrap_next(_NUMBER))
 
@@ -568,6 +571,13 @@ local function _INTERPRET()
     local entry = _popds()
     if entry == 0 then
         _NUMBER()
+        local success = _popds()
+        if success == 0 or success == false then
+            _pushds("Error: not a word or number\n")
+            _TELL()
+            _DROP()
+            return
+        end
         if MEM[_STATE_ADDR] == 1 then -- compile
             _pushds(LIT)
             _COMMA()
