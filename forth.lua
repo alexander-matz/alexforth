@@ -252,9 +252,17 @@ end
 local STORE = _add_word("!", {}, _wrap_next(_STORE))
 
 local function _HERE()
-    _pushds(#MEM+1)
+    _pushds(#MEM + 1)
 end
 local HERE = _add_word("HERE", {}, _wrap_next(_HERE))
+
+local function _TRUNCATE()
+    local new_size = _popds()
+    while #MEM > new_size do
+        table.remove(MEM)
+    end
+end
+local TRUNCATE = _add_word("TRUNCATE", {}, _wrap_next(_TRUNCATE))
 
 local function _FIND()
     local name = string.upper(_popds())
@@ -275,13 +283,6 @@ local function _CFA()
     _pushds(_cfa(offset))
 end
 local CFA = _add_word(">CFA", {}, _wrap_next(_CFA))
-
-local function _ISIMMEDIATE()
-    local entry_offset = _popds()
-    local flags = MEM[entry_offset + 2]
-    _pushds(flags.immediate or false)
-end
-local ISIMMEDIATE = _add_word("ISIMMEDIATE", {}, _wrap_next(_ISIMMEDIATE))
 
 local function _ADD()
     local v1 = _popds()
@@ -315,6 +316,21 @@ end
 local NOT = _add_word("NOT", {}, _wrap_next(_NOT))
 
 local INC = _add_word("+1", {}, DOCOL, {LIT, 1, ADD, EXIT})
+local DEC = _add_word("-1", {}, DOCOL, {LIT, 1, SUB, EXIT})
+
+local function _ISIMMEDIATE()
+    local entry_offset = _popds()
+    local flags = MEM[entry_offset + 2]
+    _pushds(flags.immediate or false)
+end
+local ISIMMEDIATE = _add_word("ISIMMEDIATE", {}, _wrap_next(_ISIMMEDIATE))
+
+local function _IMMEDIATE()
+    local entry_offset = MEM[_LATEST_ADDR]
+    local flags = MEM[entry_offset + 2]
+    flags.immediate = true
+end
+local IMMEDIATE = _add_word("IMMEDIATE", { immediate = true }, _wrap_next(_IMMEDIATE))
 
 local function _BRANCH()
     NEXT_INST = NEXT_INST + MEM[NEXT_INST]
@@ -361,6 +377,19 @@ local SUBSTORE = _add_word("-!", {}, DOCOL, {
 -- Strings can be pushed directly onto the stack, hence _LIT
 -- can be repurposed for strings as well
 local LITSTRING = _add_word("LITSTRING", {}, _wrap_next(_LIT))
+
+local function _DOT()
+    io.write(string.format("%d", _popds()))
+end
+local DOT = _add_word(".", {}, _wrap_next(_DOT))
+
+local function _EMIT()
+    io.write(string.format("%c", _popds()))
+end
+local EMIT = _add_word("EMIT", {}, _wrap_next(_EMIT))
+
+local CR = _add_word("CR", {}, DOCOL, { LIT, 13, EXIT })
+local LF = _add_word("LF", {}, DOCOL, { LIT, 10, EXIT })
 
 local function _TELL()
     io.write(_popds())
@@ -433,11 +462,6 @@ local function _DUMP()
 end
 local DUMP = _add_word("DUMP", {}, _wrap_next(_DUMP))
 
-local function _DOT()
-    io.write(string.format("%d", _popds()))
-end
-local DOT = _add_word(".", {}, _wrap_next(_DOT))
-
 local LBRAC = _add_word("[", {}, DOCOL, { LIT, 0, STATE, STORE, EXIT })
 local RBRAC = _add_word("]", {}, DOCOL, { LIT, 1, STATE, STORE, EXIT })
 
@@ -504,7 +528,7 @@ local function _DECOMPILE()
 end
 local DECOMPILE = _add_word("DECOMPILE", {}, _wrap_next(_DECOMPILE))
 
-local function _PEEKMEM()
+local function _DUMPMEM()
     local length = _popds()
     local copy = {}
     for i = #MEM-length,#MEM,1 do
@@ -512,7 +536,7 @@ local function _PEEKMEM()
     end
     print(_format_data(copy))
 end
-local PEEKMEM = _add_word("PEEKMEM", {}, _wrap_next(_PEEKMEM))
+local DUMPMEM = _add_word("DUMPMEM", {}, _wrap_next(_DUMPMEM))
 
 local function _INTERPRET()
     _run(WORD)
