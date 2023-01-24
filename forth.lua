@@ -164,6 +164,12 @@ local function VARADDR()
     return _next()
 end
 
+-- ( -- n) n = number of elements on the stack before NSTACK call
+local function _NSTACK()
+    _pushds(#DSTACK)
+end
+local NSTACK = _add_word("NSTACK", {}, _wrap_next(_NSTACK))
+
 -- ( A -- A A )
 local function _DUP()
     local val = _popds()
@@ -315,6 +321,8 @@ local function _NOT()
 end
 local NOT = _add_word("NOT", {}, _wrap_next(_NOT))
 
+local NEQ = _add_word("!=", {}, DOCOL, { EQ, NOT, EXIT })
+
 local INC = _add_word("+1", {}, DOCOL, {LIT, 1, ADD, EXIT})
 local DEC = _add_word("-1", {}, DOCOL, {LIT, 1, SUB, EXIT})
 
@@ -397,10 +405,16 @@ local function _TELL()
 end
 local TELL = _add_word("TELL", {}, _wrap_next(_TELL))
 
+local INIT_LINES = {}
 local _STDIN_BUFFER = nil
 local _STDIN_POS = nil
 
 local function _PROMPT()
+    if #INIT_LINES > 0 then
+        _STDIN_BUFFER = table.remove(INIT_LINES, 1)
+        _STDIN_POS = 1
+        return
+    end
     io.write(">>> ")
     io.flush()
     _STDIN_BUFFER = io.read("*line")
@@ -454,6 +468,15 @@ local function _NUMBER()
     _pushds(number)
 end
 local NUMBER = _add_word("NUMBER", {}, _wrap_next(_NUMBER))
+
+local function _LPARENS()
+    local word
+    repeat
+        _run(WORD)
+        word = _popds()
+    until word == ")"
+end
+local LPARENS = _add_word("(", {}, _wrap_next(_LPARENS))
 
 local function _DUMP()
     for idx = #DSTACK,1,-1 do
