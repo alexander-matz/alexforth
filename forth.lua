@@ -640,8 +640,14 @@ _add_word("ELSE", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, LIT, 2, A
 -- : THEN IMMEDIATE ( update 0BRANCH/BRANCH ) DUP HERE SWAP - SWAP ! ;
 _add_word("THEN", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, SWAP, STORE, EXIT })
 
+-- : BEGIN IMMEDIATE ( remember loop start ) HERE ;
+_add_word("BEGIN", { immediate = true }, DOCOL, { HERE, EXIT })
+
+-- : UNTIL IMMEDIATE ( jump back if false ) ' 0BRANCH , HERE -  , ;
+_add_word("UNTIL", { immediate = true }, DOCOL, { TICK, ZBRANCH, COMMA, HERE, SUB, COMMA, EXIT })
 
 table.insert(INIT_LINES, ": MYIFTEST 0 != IF 23 . LF EMIT THEN ; ")
 table.insert(INIT_LINES, ": MYIFELSETEST 0 != IF 23 ELSE 42 THEN . LF EMIT ; ")
+table.insert(INIT_LINES, ": MYREPEATTEST 0 BEGIN +1 DUP 100 = UNTIL . LF EMIT ; ")
 
 _start_vm(QUIT)
