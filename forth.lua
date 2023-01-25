@@ -109,10 +109,6 @@ end
 -- then is whatever was passed to _next, which more
 -- than likely is _next again.
 local function _next(cont)
-    -- Our return stack is still a mess at this point, so we need this
-    if NEXT_INST == nil then
-        return
-    end
     CODE_WORD = MEM[NEXT_INST]
     NEXT_INST = NEXT_INST + 1
     return MEM[CODE_WORD](cont)
