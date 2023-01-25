@@ -178,6 +178,17 @@ local function _DUP()
 end
 local DUP = _add_word("DUP", {}, _wrap_next(_DUP))
 
+-- ( A B C -- B C A )
+local function _ROT()
+    local c = _popds()
+    local b = _popds()
+    local a = _popds()
+    _pushds(b)
+    _pushds(c)
+    _pushds(a)
+end
+local ROT = _add_word("ROT", {}, _wrap_next(_ROT))
+
 -- ( A -- )
 local function _DROP()
     _popds()
@@ -240,6 +251,7 @@ local function _LIT()
     NEXT_INST = NEXT_INST + 1
 end
 local LIT = _add_word("LIT", {}, _wrap_next(_LIT))
+local TICK = _add_word("'", {}, _wrap_next(_LIT))
 
 local LATEST = _add_word("LATEST", {}, DOCOL, {LIT, _LATEST_ADDR, EXIT})
 local STATE = _add_word("STATE", {}, DOCOL, {LIT, _STATE_ADDR, EXIT})
@@ -479,7 +491,7 @@ local function _LPARENS()
         word = _popds()
     until word == ")"
 end
-local LPARENS = _add_word("(", {}, _wrap_next(_LPARENS))
+local LPARENS = _add_word("(", { immediate = true }, _wrap_next(_LPARENS))
 
 local function _DUMP()
     for idx = #DSTACK,1,-1 do
@@ -528,7 +540,7 @@ local FINDNAME = _add_word("FINDNAME", {}, _wrap_next(_FINDNAME))
 -- ( addr -- )
 local function _DECOMPILE()
     local entry = _popds()
-    io.write(string.format("Definition of %s: ", MEM[entry + 1]))
+    io.write(string.format("%s: ", MEM[entry + 1]))
     if MEM[entry+3] ~= DOCOL then
         io.write("[native word]\n")
         return
@@ -542,15 +554,21 @@ local function _DECOMPILE()
     local pos = entry+4
     repeat
         io.write(_resolve_codeword(MEM[pos]) .. " ")
-
         local dfields = data_fields[MEM[pos]] or 0
+
+        -- next word is code word, not data field
+        if MEM[pos] == TICK then
+            pos = pos + 1
+            io.write(_resolve_codeword(MEM[pos]) .. " ")
+        end
+
         for _ = 1,dfields,1 do
             pos = pos + 1
             io.write(string.format("%s ", MEM[pos]))
         end
         pos = pos + 1
     until MEM[pos] == EXIT or MEM[pos] == nil
-    io.write(_resolve_codeword(MEM[pos]) .. "\n")
+    io.write(_resolve_codeword(MEM[pos]) .. " ;\n")
 end
 local DECOMPILE = _add_word("DECOMPILE", {}, _wrap_next(_DECOMPILE))
 
@@ -612,5 +630,18 @@ MYSUB = _add_word("MYSUB", {}, DOCOL, {LIT, 1337, DOT, EXIT})
 MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Some String\n", TELL, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
 TESTVAR = _add_word("TESTVAR", {}, VARADDR, {0})
 BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
+
+-- : IF IMMEDIATE ( prepare 0BRANCH + ARG ) ' 0BRANCH , HERE 0 , ;
+_add_word("IF", { immediate = true }, DOCOL, { TICK, ZBRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
+
+-- : ELSE IMMEDIATE ( update 0BRANCH ) DUP HERE SWAP - 2 + SWAP ! ( prepare BRANCH ) ' BRANCH , HERE 0 , ;
+_add_word("ELSE", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, LIT, 2, ADD, SWAP, STORE, TICK, BRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
+
+-- : THEN IMMEDIATE ( update 0BRANCH/BRANCH ) DUP HERE SWAP - SWAP ! ;
+_add_word("THEN", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, SWAP, STORE, EXIT })
+
+
+table.insert(INIT_LINES, ": MYIFTEST 0 != IF 23 . LF EMIT THEN ; ")
+table.insert(INIT_LINES, ": MYIFELSETEST 0 != IF 23 ELSE 42 THEN . LF EMIT ; ")
 
 _start_vm(QUIT)
