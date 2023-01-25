@@ -594,7 +594,7 @@ local function _INTERPRET()
             _pushds("Error: not a word or number\n")
             _TELL()
             _DROP()
-            return
+            return _next()
         end
         if MEM[_STATE_ADDR] == 1 then -- compile
             _pushds(LIT)
@@ -621,8 +621,9 @@ local function _INTERPRET()
             end
         end
     end
+    return _next()
 end
-local INTERPRET = _add_word("INTERPRET", {}, _wrap_next(_INTERPRET))
+local INTERPRET = _add_word("INTERPRET", {}, _INTERPRET)
 
 QUIT = _add_word("QUIT", {}, DOCOL, {INTERPRET, BRANCH, -2, EXIT})
 
