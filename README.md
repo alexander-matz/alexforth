@@ -1,4 +1,4 @@
-# ALEXFORTH
+# alexforth
 
 alexforth is a forth implementation purely intended for educational purposes.
 It is currently implemented in lua, but might slowly transition to an assembly
@@ -12,7 +12,7 @@ Lua as the implementation was chosen for two reasons:
   C, functions that don't return are a bit iffy.
 - The existence of DynASM might allow for a gradual transition to assembly.
 
-# PUBLIC DOMAIN
+# Public domain
 
 I, the copyright holder of this work, hereby release it into the public domain.
 This applies worldwide. In case this is not legally possible, I grant any entity
