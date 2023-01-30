@@ -519,8 +519,10 @@ local WORD = _add_word("WORD", {}, DOCOL,{
 
 -- This project uses the specification for ticks from https://forth-standard.org/
 -- which differs from the one in jonesforth
--- : ' WORD FIND DUP IF 3 + THEN ;
-local TICK = _add_word("'", { }, DOCOL, { WORD, FIND, DUP, ZBRANCH, 4, LIT, 3, ADD, EXIT })
+-- : ' WORD FIND DUP IF >CFA THEN ;
+local TICK = _add_word("'", { }, DOCOL, { WORD, FIND, DUP, ZBRANCH, 2, CFA, EXIT })
+-- : ['] IMMEDIATE ' POSTPONE LITERAL ;
+local CTICK = _add_word("[']", { immediate = true }, DOCOL, { TICK, LITERAL, EXIT })
 
 local function _NUMBER(cont)
     local value = _popds()
@@ -690,10 +692,10 @@ MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Some String\n", TELL,
 TESTVAR = _add_word("TESTVAR", {}, VARADDR, {0})
 BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
 
--- : IF IMMEDIATE ( prepare 0BRANCH + ARG ) ' 0BRANCH , HERE 0 , ;
+-- : IF IMMEDIATE ( prepare 0BRANCH + ARG ) ['] 0BRANCH , HERE 0 , ;
 _add_word("IF", { immediate = true }, DOCOL, { LIT, ZBRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
 
--- : ELSE IMMEDIATE ( update 0BRANCH ) DUP HERE SWAP - 2 + SWAP ! ( prepare BRANCH ) ' BRANCH , HERE 0 , ;
+-- : ELSE IMMEDIATE ( update 0BRANCH ) DUP HERE SWAP - 2 + SWAP ! ( prepare BRANCH ) ['] BRANCH , HERE 0 , ;
 _add_word("ELSE", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, LIT, 2, ADD, SWAP, STORE, LIT, BRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
 
 -- : THEN IMMEDIATE ( update 0BRANCH/BRANCH ) DUP HERE SWAP - SWAP ! ;
@@ -702,7 +704,7 @@ _add_word("THEN", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, SWAP, STO
 -- : BEGIN IMMEDIATE ( remember loop start ) HERE ;
 _add_word("BEGIN", { immediate = true }, DOCOL, { HERE, EXIT })
 
--- : UNTIL IMMEDIATE ( jump back if false ) ' 0BRANCH , HERE -  , ;
+-- : UNTIL IMMEDIATE ( jump back if false ) ['] 0BRANCH , HERE -  , ;
 _add_word("UNTIL", { immediate = true }, DOCOL, { LIT, ZBRANCH, COMMA, HERE, SUB, COMMA, EXIT })
 
 table.insert(INIT_LINES, ": MYIFTEST 0 != IF 23 . LF EMIT THEN ; ")
