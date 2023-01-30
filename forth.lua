@@ -178,12 +178,12 @@ local function VARADDR(cont)
     return cont(cont)
 end
 
--- ( -- n) n = number of elements on the stack before NSTACK call
-local function _NSTACK(cont)
+-- ( -- n) n = number of elements on the stack before DEPTH call
+local function _DEPTH(cont)
     _pushds(#DSTACK)
     return cont(cont)
 end
-local NSTACK = _add_word("NSTACK", {}, _NSTACK)
+local DEPTH = _add_word("DEPTH", {}, _DEPTH)
 
 -- ( A -- A A )
 local function _DUP(cont)
@@ -311,14 +311,17 @@ local function _HERE(cont)
 end
 local HERE = _add_word("HERE", {}, _HERE)
 
-local function _TRUNCATE(cont)
-    local new_size = _popds()
+local function _ALLOT(cont)
+    local new_size = #MEM + _popds()
+    while #MEM < new_size do
+        table.insert(MEM, 0)
+    end
     while #MEM > new_size do
         table.remove(MEM)
     end
     return cont(cont)
 end
-local TRUNCATE = _add_word("TRUNCATE", {}, _TRUNCATE)
+local ALLOT = _add_word("ALLOT", {}, _ALLOT)
 
 local function _FIND(cont)
     local name = string.upper(_popds())
