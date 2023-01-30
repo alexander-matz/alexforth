@@ -12,6 +12,75 @@
     Lua supports proper tail calls by default. This is very convenient
     because it allows a straight forward implmenetation of the VM running
     indirect threaded code.
+
+    Why is indirect threaded code important? Because it provides some
+    context about from where native code is invoked. Let's look at an
+    example: we want to create a variable named MYVAR.
+    In forth this means we need a word that, when executed, puts the address
+    of our variable on the stack.
+    Whatever native code will in the end put the address of the variable on
+    the stack needs to know this address.
+
+    In direct threaded code, knowing the address of the variable is a bit
+    tricky. The implementation will look something like this
+
+    ```lua
+    function put_variable()
+        ... code to put variable address on the stack ...
+        return next()
+    end
+    ...
+    define_variable("MYVAR")
+    ```
+    `put_variable` puts the address on the stack and then jumps to (instead
+    of calling, because of tail call support) the code triggering the
+    execution of the next word. `MYVAR` should call out to put_variable such
+    that put_variable puts the address of the variable storage on the stack.
+
+    A higher level word that uses `put_variable` could be defined like this:
+    `define_word("MYWORD", { some_word, MYVAR, some_other_word })`.
+    In direct threaded code, MYVAR directly points to some executable code.
+
+    Now let's look at what information `put_variable` might have available to
+    figure out what address MYVAR has:
+    - Data stack: no, because putting the variable's address on the data stack
+        is the problem we're trying to solve
+    - Return stack: no, manipulation of the return stack across word boundaries
+        is limited to starting and finishing word execution
+    - Call origin: no, the call origin here is MYWORD, which does not give us
+        any information about MYVAR
+
+    Hence, direct threaded code needs some other, out-of-band information to
+    determine the correct address to put on the stack for MYVAR. This can be
+    done e.g. by creating a closure for each variable and having the word point
+    to this closure directly. While this is easy to implement in lua, it seems
+    wasteful and complicated to implement for bare-bones FORTH implementations
+    written in assembly.
+
+    Indirect threaded code elegantly solves this issue. Let's look again at
+    how `MYWORD` is defined:
+    `define_word("MYWORD", { some_word, MYVAR , some_other_word })`.
+    Now, MYVAR does not point to executable code directly, it points to a
+    location in memory (in lua an array offset) that contains executable code.
+    So after calling `define_variable("MYVAR")`, our "memory" array will look
+    something like this:
+    ```
+    |  cell x-1: ... | cell x: put_variable | cell x+1: ... |
+    ```
+    and `MYVAR` will contain the number `x`. Now when we call put_variable
+    as part of some arbitrary word (`MYWORD`), the call origin is now `x`, which
+    is unique to MYVAR and can be used to determine the correct address to put
+    on the stack. In practice, that address will simply be x+1 and that cell
+    will also provide the storage for the variable. So the memory array will
+    look like this:
+    ```
+    |  cell x-1: ... | cell x: put_variable | cell x+1: MYVAR | cell x+2: ...  |
+    ```
+
+    This trick is used for multiple purposes (word definitions, variable
+    definitions, branches, encoding literals) and because of its simplicit and
+    elegance, indirect threaded code is the execution model of choice for forth.
+
 --]]
 
 --------------------------------------
