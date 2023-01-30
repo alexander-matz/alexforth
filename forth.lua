@@ -254,6 +254,18 @@ local function _DEPTH(cont)
 end
 local DEPTH = _add_word("DEPTH", {}, _DEPTH)
 
+local function _CLEARDSTACK(cont)
+    DSTACK = {}
+    return cont(cont)
+end
+local CLEARDSTACK = _add_word("CLEAR-DSTACK", {}, _CLEARDSTACK)
+
+local function _CLEARRSTACK(cont)
+    RSTACK = {}
+    return cont(cont)
+end
+local CLEARRSTACK = _add_word("CLEAR-RSTACK", {}, _CLEARRSTACK)
+
 -- ( A -- A A )
 local function _DUP(cont)
     local val = _popds()
@@ -669,8 +681,14 @@ local FINDNAME = _add_word("FINDNAME", {}, _FINDNAME)
 
 -- ( addr -- )
 local function _DECOMPILE(cont)
+    _run(WORD)
+    _run(FIND)
     local entry = _popds()
-    io.write(string.format("%s: ", MEM[entry + 1]))
+    if entry == 0 then
+        io.write("Unable to find word\n")
+        return cont(cont)
+    end
+    io.write(string.format(": %s ", MEM[entry + 1]))
     if MEM[entry+3] ~= DOCOL then
         io.write("[native word]\n")
         return cont(cont)
@@ -698,7 +716,11 @@ local function _DECOMPILE(cont)
         end
         pos = pos + 1
     until MEM[pos] == EXIT or MEM[pos] == nil
-    io.write(_resolve_codeword(MEM[pos]) .. " ;\n")
+    io.write(_resolve_codeword(MEM[pos]) .. " ;")
+    if type(MEM[entry+2]) == "table" and MEM[entry+2].immediate then
+        io.write(" IMMEDIATE")
+    end
+    io.write("\n")
     return cont(cont)
 end
 local DECOMPILE = _add_word("DECOMPILE", {}, _DECOMPILE)
@@ -757,27 +779,64 @@ local function _INTERPRET(cont)
 end
 local INTERPRET = _add_word("INTERPRET", {}, _INTERPRET)
 
-QUIT = _add_word("QUIT", {}, DOCOL, {INTERPRET, BRANCH, -2, EXIT})
+QUIT = _add_word("QUIT", {}, DOCOL, { CLEARRSTACK, INTERPRET, BRANCH, -2, EXIT })
+ABORT = _add_word("ABORT", {}, DOCOL, { CLEARDSTACK, QUIT })
 
 MYSUB = _add_word("MYSUB", {}, DOCOL, {LIT, 1337, DOT, EXIT})
 MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Some String\n", TELL, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
 TESTVAR = _add_word("TESTVAR", {}, VARADDR, {0})
 BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
 
--- : IF IMMEDIATE ( prepare 0BRANCH + ARG ) ['] 0BRANCH , HERE 0 , ;
+-- : IF ( prepare 0BRANCH + ARG ) ['] 0BRANCH , HERE 0 , ; IMMEDIATE
 _add_word("IF", { immediate = true }, DOCOL, { LIT, ZBRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
 
--- : ELSE IMMEDIATE ( update 0BRANCH ) DUP HERE SWAP - 2 + SWAP ! ( prepare BRANCH ) ['] BRANCH , HERE 0 , ;
+--[[
+    : ELSE
+        ( update 0BRANCH ) DUP HERE SWAP - 2 + SWAP !
+        ( prepare BRANCH ) ['] BRANCH , HERE 0 ,
+    ; IMMEDIATE
+]]
 _add_word("ELSE", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, LIT, 2, ADD, SWAP, STORE, LIT, BRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
 
--- : THEN IMMEDIATE ( update 0BRANCH/BRANCH ) DUP HERE SWAP - SWAP ! ;
+-- : THEN ( update 0BRANCH/BRANCH ) DUP HERE SWAP - SWAP ! ; IMMEDIATE
 _add_word("THEN", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, SWAP, STORE, EXIT })
 
--- : BEGIN IMMEDIATE ( remember loop start ) HERE ;
+--[[
+    : BEGIN ( C: -- loop ) HERE ; IMMEDIATE
+    Can be used as either:
+    BEGIN ... condition UNTIL
+    or
+    BEGIN ... condition WHILE ... REPEAT
+]]
 _add_word("BEGIN", { immediate = true }, DOCOL, { HERE, EXIT })
 
--- : UNTIL IMMEDIATE ( jump back if false ) ['] 0BRANCH , HERE -  , ;
+-- : UNTIL ( jump back if false ) ['] 0BRANCH , HERE -  , ; IMMEDIATE
 _add_word("UNTIL", { immediate = true }, DOCOL, { LIT, ZBRANCH, COMMA, HERE, SUB, COMMA, EXIT })
+
+--[[
+    : WHILE ( C: loop -- loop after )
+        ( prepare branch for exit ) ['] 0BRANCH , HERE
+        ( fill dummy value ) 0 ,
+    ; IMMEDIATE
+]]
+_add_word("WHILE", { immediate = true }, DOCOL, {
+    LIT, ZBRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT
+})
+
+--[[
+    : REPEAT ( C: loop after -- )
+        ( add branch to loop start )
+        ['] BRANCH , SWAP HERE - ,
+        ( backfill 0BRANCH from WHILE )
+        DUP HERE SWAP - SWAP !
+    ; IMMEDIATE
+    Testing:
+    : MYWHILETEST 0 BEGIN DUP 10 != WHILE +1 REPEAT ;
+    T{ MYWHILETEST -> 10 }
+]]
+_add_word("REPEAT", { immediate = true }, DOCOL, {
+    LIT, BRANCH, COMMA, SWAP, HERE, SUB, COMMA, DUP, HERE, SWAP, SUB, SWAP, STORE, EXIT
+})
 
 table.insert(INIT_LINES, ": MYIFTEST 0 != IF 23 . LF EMIT THEN ; ")
 table.insert(INIT_LINES, ": MYIFELSETEST 0 != IF 23 ELSE 42 THEN . LF EMIT ; ")
