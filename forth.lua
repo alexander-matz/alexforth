@@ -31,9 +31,12 @@ NEXT_INST = nil
 CODE_WORD = nil
 
 local _codeword_to_name = {}
-local function _resolve_codeword(code_word)
+local function _try_resolve_codeword(code_word)
     local name = _codeword_to_name[code_word]
-    return name or "N/A"
+    return name
+end
+local function _resolve_codeword(code_word)
+    return _try_resolve_codeword(code_word) or "N/A"
 end
 
 --------------------------------------
@@ -272,8 +275,17 @@ local function _LIT(cont)
     return cont(cont)
 end
 local LIT = _add_word("LIT", {}, _LIT)
-local TICK = _add_word("'", {}, _LIT)
 local LITSTRING = _add_word("LITSTRING", {}, _LIT)
+
+local function _COMMA(cont)
+    MEM[#MEM+1] = _popds()
+    return cont(cont)
+end
+local COMMA = _add_word(",", {}, _COMMA)
+
+-- compile-time: ( x -- )
+-- appends run-time: ( -- x )
+local LITERAL = _add_word("LITERAL", { immediate = true }, DOCOL, { LIT, LIT, COMMA, COMMA, EXIT })
 
 local LATEST = _add_word("LATEST", {}, DOCOL, {LIT, _LATEST_ADDR, EXIT})
 local STATE = _add_word("STATE", {}, DOCOL, {LIT, _STATE_ADDR, EXIT})
@@ -403,12 +415,6 @@ local function _ZBRANCH(cont)
 end
 local ZBRANCH = _add_word("0BRANCH", {}, _ZBRANCH)
 
-local function _COMMA(cont)
-    MEM[#MEM+1] = _popds()
-    return cont(cont)
-end
-local COMMA = _add_word(",", {}, _COMMA)
-
 -- ( ch1 ch2 ... chn n -- str)
 -- This is terrible, but using MEM as scratch requires mutable HERE
 local function _MAKESTRING(cont)
@@ -511,6 +517,11 @@ local WORD = _add_word("WORD", {}, DOCOL,{
     EXIT
 })
 
+-- This project uses the specification for ticks from https://forth-standard.org/
+-- which differs from the one in jonesforth
+-- : ' WORD FIND DUP IF 3 + THEN ;
+local TICK = _add_word("'", { }, DOCOL, { WORD, FIND, DUP, ZBRANCH, 4, LIT, 3, ADD, EXIT })
+
 local function _NUMBER(cont)
     local value = _popds()
     local number = tonumber(value)
@@ -543,8 +554,8 @@ local function _DUMP(cont)
 end
 local DUMP = _add_word("DUMP", {}, _DUMP)
 
-local LBRAC = _add_word("[", {}, DOCOL, { LIT, 0, STATE, STORE, EXIT })
-local RBRAC = _add_word("]", {}, DOCOL, { LIT, 1, STATE, STORE, EXIT })
+local LBRAC = _add_word("[", { immediate = true }, DOCOL, { LIT, 0, STATE, STORE, EXIT })
+local RBRAC = _add_word("]", { immediate = true }, DOCOL, { LIT, 1, STATE, STORE, EXIT })
 
 local function _CREATE(cont)
     local name = _popds()
@@ -601,15 +612,15 @@ local function _DECOMPILE(cont)
         io.write(_resolve_codeword(MEM[pos]) .. " ")
         local dfields = data_fields[MEM[pos]] or 0
 
-        -- next word is code word, not data field
-        if MEM[pos] == TICK then
-            pos = pos + 1
-            io.write(_resolve_codeword(MEM[pos]) .. " ")
-        end
-
         for _ = 1,dfields,1 do
             pos = pos + 1
-            io.write(string.format("%s ", MEM[pos]))
+            local numeric = MEM[pos]
+            local word = _try_resolve_codeword(numeric)
+            if word then
+                io.write(string.format("%s/%s ", numeric, word))
+            else
+                io.write(string.format("%s ", numeric))
+            end
         end
         pos = pos + 1
     until MEM[pos] == EXIT or MEM[pos] == nil
@@ -680,10 +691,10 @@ TESTVAR = _add_word("TESTVAR", {}, VARADDR, {0})
 BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
 
 -- : IF IMMEDIATE ( prepare 0BRANCH + ARG ) ' 0BRANCH , HERE 0 , ;
-_add_word("IF", { immediate = true }, DOCOL, { TICK, ZBRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
+_add_word("IF", { immediate = true }, DOCOL, { LIT, ZBRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
 
 -- : ELSE IMMEDIATE ( update 0BRANCH ) DUP HERE SWAP - 2 + SWAP ! ( prepare BRANCH ) ' BRANCH , HERE 0 , ;
-_add_word("ELSE", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, LIT, 2, ADD, SWAP, STORE, TICK, BRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
+_add_word("ELSE", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, LIT, 2, ADD, SWAP, STORE, LIT, BRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
 
 -- : THEN IMMEDIATE ( update 0BRANCH/BRANCH ) DUP HERE SWAP - SWAP ! ;
 _add_word("THEN", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, SWAP, STORE, EXIT })
@@ -692,7 +703,7 @@ _add_word("THEN", { immediate = true }, DOCOL, { DUP, HERE, SWAP, SUB, SWAP, STO
 _add_word("BEGIN", { immediate = true }, DOCOL, { HERE, EXIT })
 
 -- : UNTIL IMMEDIATE ( jump back if false ) ' 0BRANCH , HERE -  , ;
-_add_word("UNTIL", { immediate = true }, DOCOL, { TICK, ZBRANCH, COMMA, HERE, SUB, COMMA, EXIT })
+_add_word("UNTIL", { immediate = true }, DOCOL, { LIT, ZBRANCH, COMMA, HERE, SUB, COMMA, EXIT })
 
 table.insert(INIT_LINES, ": MYIFTEST 0 != IF 23 . LF EMIT THEN ; ")
 table.insert(INIT_LINES, ": MYIFELSETEST 0 != IF 23 ELSE 42 THEN . LF EMIT ; ")
