@@ -314,7 +314,7 @@ local function _FIND(cont)
     while offset ~= 0 do
         if MEM[offset + 1] == name then
             _pushds(offset)
-            return
+            return cont(cont)
         end
         offset = MEM[offset]
     end
@@ -517,7 +517,7 @@ local function _NUMBER(cont)
     if not number then
         _pushds(0)
         _pushds(0)
-        return
+        return cont(cont)
     end
     _pushds(number)
     _pushds(1)
@@ -588,7 +588,7 @@ local function _DECOMPILE(cont)
     io.write(string.format("%s: ", MEM[entry + 1]))
     if MEM[entry+3] ~= DOCOL then
         io.write("[native word]\n")
-        return
+        return cont(cont)
     end
     local data_fields = {
         [LIT] = 1,
