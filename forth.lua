@@ -601,6 +601,25 @@ local WORD = _add_word("WORD", {}, DOCOL,{
     EXIT
 })
 
+local CH_QUOTE = _add_word("'\"'", {}, DOCOL, { LITSTRING, "\"", EXIT })
+
+--[[
+    : S"
+        0
+        BEGIN
+            KEY
+            DUP '"' !=
+        WHILE
+            SWAP +1
+        REPEAT
+        DROP
+        MAKESTRING
+    ;
+]]
+local SQUOTE = _add_word("S\"", { }, DOCOL, {
+    LIT, 0, KEY, DUP, CH_QUOTE, NEQ, ZBRANCH, 5, SWAP, INC, BRANCH, -9, DROP, MAKESTRING, EXIT
+})
+
 -- This project uses the specification for ticks from https://forth-standard.org/
 -- which differs from the one in jonesforth
 -- : ' WORD FIND DUP IF >CFA THEN ;
