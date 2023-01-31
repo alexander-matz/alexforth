@@ -587,14 +587,14 @@ local function _KEY(cont)
     _STDIN_POS = _STDIN_POS + 1
     return cont(cont)
 end
-KEY = _add_word("KEY", {}, _KEY)
+local KEY = _add_word("KEY", {}, _KEY)
 
 local function _ISWS(cont)
     local ch = _popds()
     _pushds(ch == ' ' or ch == '\n' or ch == '\t')
     return cont(cont)
 end
-ISWS = _add_word("ISWS", {}, _ISWS)
+local ISWS = _add_word("ISWS", {}, _ISWS)
 
 local WORD = _add_word("WORD", {}, DOCOL,{
     -- counter for how number chars we have on the stack
@@ -806,13 +806,13 @@ local function _INTERPRET(cont)
 end
 local INTERPRET = _add_word("INTERPRET", {}, _INTERPRET)
 
-QUIT = _add_word("QUIT", {}, DOCOL, { CLEARRSTACK, INTERPRET, BRANCH, -2, EXIT })
-ABORT = _add_word("ABORT", {}, DOCOL, { CLEARDSTACK, QUIT })
+local QUIT = _add_word("QUIT", {}, DOCOL, { CLEARRSTACK, INTERPRET, BRANCH, -2, EXIT })
+local ABORT = _add_word("ABORT", {}, DOCOL, { CLEARDSTACK, QUIT })
 
-MYSUB = _add_word("MYSUB", {}, DOCOL, {LIT, 1337, DOT, EXIT})
-MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Some String\n", TELL, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
-TESTVAR = _add_word("TESTVAR", {}, VARADDR, {0})
-BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
+local MYSUB = _add_word("MYSUB", {}, DOCOL, {LIT, 1337, DOT, EXIT})
+local MYPROGRAM = _add_word("MYPROGRAM", {}, DOCOL, {LITSTRING, "Some String\n", TELL, LIT, 2, LIT, 3, MYSUB, LIT, 4, DUMP, EXIT})
+local TESTVAR = _add_word("TESTVAR", {}, VARADDR, {0})
+local BRANCHTEST = _add_word("BRANCHTEST", {}, DOCOL, {LIT, 1, BRANCH, 3, LIT, 2, LIT, 3, DUMP, EXIT})
 
 -- : IF ( prepare 0BRANCH + ARG ) ['] 0BRANCH , HERE 0 , ; IMMEDIATE
 _add_word("IF", { immediate = true }, DOCOL, { LIT, ZBRANCH, COMMA, HERE, LIT, 0, COMMA, EXIT })
