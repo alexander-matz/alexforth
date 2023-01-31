@@ -81,6 +81,17 @@
     definitions, branches, encoding literals) and because of its simplicit and
     elegance, indirect threaded code is the execution model of choice for forth.
 
+    Notes for the inconsistently used stack effect comments:
+    - E: execution time. This is when the word is run as part of the interpreter
+        or some other word
+    - C: compile time. This is what happens when the word is run as an immediate
+        word in compilation mode
+    - R: run time. Most compile time words dynamically add some code to the
+        current word being defined. The runtime semantics refer to what happens
+        when the dynamically added code is executed. E.g. LITERAL has the compile
+        time effect of consuming a value from the data stack and the runtime
+        semantics of pushing that same value to the data stacks, or in other
+        words, hardcoding a literal value into a word.
 --]]
 
 --------------------------------------
@@ -364,8 +375,8 @@ local function _COMMA(cont)
 end
 local COMMA = _add_word(",", {}, _COMMA)
 
--- compile-time: ( x -- )
--- appends run-time: ( -- x )
+-- ( C: x -- )
+-- ( R: -- x )
 local LITERAL = _add_word("LITERAL", { immediate = true }, DOCOL, { LIT, LIT, COMMA, COMMA, EXIT })
 
 local LATEST = _add_word("LATEST", {}, DOCOL, {LIT, _LATEST_ADDR, EXIT})
@@ -604,6 +615,7 @@ local WORD = _add_word("WORD", {}, DOCOL,{
 local CH_QUOTE = _add_word("'\"'", {}, DOCOL, { LITSTRING, "\"", EXIT })
 
 --[[
+    -- ( E: -- str )
     : S"
         0
         BEGIN
