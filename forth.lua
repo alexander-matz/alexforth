@@ -369,6 +369,9 @@ end
 local LIT = _add_word("LIT", {}, _LIT)
 local LITSTRING = _add_word("LITSTRING", {}, _LIT)
 
+local CH_QUOTE = _add_word("'\"'", {}, DOCOL, { LITSTRING, "\"", EXIT })
+local CH_RPARENS = _add_word("')'", {}, DOCOL, { LITSTRING, ")", EXIT })
+
 local function _COMMA(cont)
     MEM[#MEM+1] = _popds()
     return cont(cont)
@@ -612,8 +615,6 @@ local WORD = _add_word("WORD", {}, DOCOL,{
     EXIT
 })
 
-local CH_QUOTE = _add_word("'\"'", {}, DOCOL, { LITSTRING, "\"", EXIT })
-
 --[[
     -- ( E: -- str )
     : S"
@@ -653,15 +654,10 @@ local function _NUMBER(cont)
 end
 local NUMBER = _add_word("NUMBER", {}, _NUMBER)
 
-local function _LPARENS(cont)
-    local word
-    repeat
-        _run(WORD)
-        word = _popds()
-    until word == ")"
-    return cont(cont)
-end
-local LPARENS = _add_word("(", { immediate = true }, _LPARENS)
+-- : ( BEGIN WORD ')' = UNTIL ; IMMEDIATE
+local LPARENS = _add_word("(", { immediate = true }, DOCOL, {
+    WORD, CH_RPARENS, EQ, ZBRANCH, -4, EXIT
+})
 
 local function _DUMP(cont)
     for idx = #DSTACK,1,-1 do
